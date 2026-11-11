@@ -19,8 +19,8 @@ const realisticFixture: SerpApiFlightsResponse = {
       flights: [
         {
           departure_airport: {
-            name: "Kuala Lumpur International Airport",
-            id: "KUL",
+            name: "Singapore Changi Airport",
+            id: "SIN",
             time: "2026-12-10 02:45",
           },
           arrival_airport: {
@@ -30,7 +30,7 @@ const realisticFixture: SerpApiFlightsResponse = {
           },
           duration: 470,
           airline: "Qatar Airways",
-          flight_number: "QR 853",
+          flight_number: "QR 945",
           extensions: ["Average legroom (31 in)", "Wi-Fi for a fee"],
         },
         {
@@ -40,13 +40,13 @@ const realisticFixture: SerpApiFlightsResponse = {
             time: "2026-12-10 09:05",
           },
           arrival_airport: {
-            name: "Damascus International Airport",
-            id: "DAM",
+            name: "Cairo International Airport",
+            id: "CAI",
             time: "2026-12-10 12:15",
           },
           duration: 190,
           airline: "Qatar Airways",
-          flight_number: "QR 410",
+          flight_number: "QR 1301",
           extensions: ["Average legroom (31 in)"],
         },
       ],
@@ -68,8 +68,8 @@ const realisticFixture: SerpApiFlightsResponse = {
       flights: [
         {
           departure_airport: {
-            name: "Kuala Lumpur International Airport",
-            id: "KUL",
+            name: "Singapore Changi Airport",
+            id: "SIN",
             time: "2026-12-10 08:00",
           },
           arrival_airport: {
@@ -78,8 +78,8 @@ const realisticFixture: SerpApiFlightsResponse = {
             time: "2026-12-10 11:30",
           },
           duration: 450,
-          airline: "AirAsia X",
-          flight_number: "D7 192",
+          airline: "AirAsia",
+          flight_number: "AK 192",
           extensions: ["Self transfer at SHJ"],
         },
         {
@@ -89,13 +89,13 @@ const realisticFixture: SerpApiFlightsResponse = {
             time: "2026-12-10 15:00",
           },
           arrival_airport: {
-            name: "Damascus International Airport",
-            id: "DAM",
+            name: "Cairo International Airport",
+            id: "CAI",
             time: "2026-12-10 17:30",
           },
           duration: 210,
-          airline: "Cham Wings",
-          flight_number: "6Q 512",
+          airline: "Air Arabia",
+          flight_number: "G9 512",
         },
       ],
       layovers: [
@@ -108,24 +108,27 @@ const realisticFixture: SerpApiFlightsResponse = {
       total_duration: 870,
       price: 1620,
       type: "One way",
-      extensions: ["Separate tickets booked together", "Checked baggage for a fee"],
+      extensions: [
+        "Separate tickets booked together",
+        "Checked baggage for a fee",
+      ],
     },
     {
       flights: [
         {
-          departure_airport: { id: "KUL", time: "2026-12-10 19:15" },
+          departure_airport: { id: "SIN", time: "2026-12-10 19:15" },
           arrival_airport: { id: "IST", time: "2026-12-11 01:30" },
           duration: 675,
           airline: "Turkish Airlines",
-          flight_number: "TK 61",
+          flight_number: "TK 55",
           extensions: ["30 kg checked baggage included"],
         },
         {
           departure_airport: { id: "IST", time: "2026-12-11 06:00" },
-          arrival_airport: { id: "DAM", time: "2026-12-11 08:15" },
+          arrival_airport: { id: "CAI", time: "2026-12-11 08:15" },
           duration: 135,
           airline: "Turkish Airlines",
-          flight_number: "TK 846",
+          flight_number: "TK 690",
         },
       ],
       layovers: [
@@ -146,14 +149,13 @@ describe("SerpApi Google Flights Parser", () => {
   it("parses best_flights and other_flights with prices, USD conversion, and layover minutes->hours", () => {
     const offers = parseSerpApiResponse(realisticFixture, {
       outboundDate: "2026-12-10",
-      originIata: "KUL",
-      destinationIata: "DAM",
+      originIata: "SIN",
+      destinationIata: "CAI",
       usdRate: 0.22,
     });
 
     assert.equal(offers.length, 3);
 
-    // First offer: Qatar Airways
     const qr = offers[0];
     assert.equal(qr.priceMYR, 2180);
     assert.equal(qr.priceUSD, 479.6);
@@ -169,7 +171,6 @@ describe("SerpApi Google Flights Parser", () => {
       "https://www.google.com/travel/flights?hl=en&gl=my&curr=MYR"
     );
 
-    // Second offer: Self-transfer option
     const selfTransfer = offers[1];
     assert.equal(selfTransfer.priceMYR, 1620);
     assert.equal(selfTransfer.isSinglePNR, false);
@@ -177,7 +178,6 @@ describe("SerpApi Google Flights Parser", () => {
     assert.equal(selfTransfer.checkedBaggageKg, 0);
     assert.equal(selfTransfer.baggageVerified, true);
 
-    // Third offer: Explicit 30 kg checked baggage
     const tk = offers[2];
     assert.equal(tk.priceMYR, 2490);
     assert.deepEqual(tk.layoverDurationsHours, [4.5]);
@@ -237,12 +237,11 @@ describe("SerpApi Google Flights Parser", () => {
       { error: "Google Flights hasn't returned any results for this query." },
       {
         outboundDate: "2026-12-10",
-        originIata: "KUL",
-        destinationIata: "DAM",
+        originIata: "SIN",
+        destinationIata: "CAI",
         usdRate: 0.22,
       }
     );
     assert.deepEqual(empty, []);
   });
 });
-

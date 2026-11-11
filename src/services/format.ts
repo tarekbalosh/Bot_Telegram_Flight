@@ -1,8 +1,71 @@
+import { env } from "../config/env";
 import { UnifiedFlightOffer } from "../types/flight";
+import {
+  AIRPORT_ARABIC_NAMES,
+  formatAirportWithCode,
+  getAirportNameAr,
+} from "../utils/airports";
+
+export {
+  AIRPORT_ARABIC_NAMES,
+  formatAirportWithCode,
+  getAirportNameAr,
+} from "../utils/airports";
+
+export function formatReportTitle(
+  originIata: string = env.ORIGIN_IATA,
+  destinationIata: string = env.DESTINATION_IATA
+): string {
+  const origAr = getAirportNameAr(originIata);
+  const destAr = getAirportNameAr(destinationIata);
+  return `✈️ تقرير أرخص رحلات الطيران (${origAr} ➔ ${destAr})`;
+}
+
+export function formatRouteHeader(
+  originIata: string = env.ORIGIN_IATA,
+  destinationIata: string = env.DESTINATION_IATA
+): string {
+  const origLabel = formatAirportWithCode(originIata);
+  const destLabel = formatAirportWithCode(destinationIata);
+  return `المسار: ${origLabel} ⬅️ ${destLabel} — اتجاه واحد`;
+}
+
+export function formatNoMatchingFlightsTitle(
+  originIata: string = env.ORIGIN_IATA,
+  destinationIata: string = env.DESTINATION_IATA
+): string {
+  const orig = originIata.trim().toUpperCase();
+  const dest = destinationIata.trim().toUpperCase();
+  return `⚠️ لا توجد رحلات مطابقة للشروط حالياً (${orig} ➔ ${dest})`;
+}
+
+export function formatNoMatchingFlightsBody(
+  destinationIata: string = env.DESTINATION_IATA
+): string {
+  const destAr = getAirportNameAr(destinationIata);
+  return `لم يتم العثور على أي رحلات بتذكرة موحدة (PNR واحد) مع شحن الحقائب إلى ${destAr} ومدة ترانزيت مناسبة ضمن التواريخ المحددة.`;
+}
+
+export function formatBaggageVerifiedText(
+  kg: number,
+  destinationNameAr: string = getAirportNameAr(env.DESTINATION_IATA)
+): string {
+  return `✅ تذكرة موحدة — استلام الحقائب في ${destinationNameAr} (${kg} كغ)`;
+}
+
+export function formatSingleTicketConfirmText(
+  destinationNameAr: string = getAirportNameAr(env.DESTINATION_IATA)
+): string {
+  return `تأكيد: شحن الحقائب مباشرة إلى ${destinationNameAr} بدون استلام في الترانزيت`;
+}
 
 export const ARABIC_STRINGS = {
-  reportTitle: "✈️ تقرير أرخص رحلات الطيران (كوالالمبور ➔ دمشق)",
-  routeHeader: "المسار: كوالالمبور (KUL) ⬅️ دمشق (DAM) — اتجاه واحد",
+  get reportTitle(): string {
+    return formatReportTitle();
+  },
+  get routeHeader(): string {
+    return formatRouteHeader();
+  },
   lowestPriceLabel: "أقل سعر متاح",
   targetBeatenBadge: "تم تحقيق السعر المستهدف ✅",
   targetNotBeatenBadge: "السعر الحالي أعلى من السعر المستهدف 🎯",
@@ -23,39 +86,30 @@ export const ARABIC_STRINGS = {
   kgUnit: "كغ",
   myrUnit: "ر.م",
   usdUnit: "دولار",
-  noMatchingFlightsTitle: "⚠️ لا توجد رحلات مطابقة للشروط حالياً (KUL ➔ DAM)",
-  noMatchingFlightsBody:
-    "لم يتم العثور على أي رحلات بتذكرة موحدة (PNR واحد) مع شحن الحقائب إلى دمشق ومدة ترانزيت مناسبة ضمن التواريخ المحددة.",
-  baggageVerifiedTemplate: (kg: number) =>
-    `✅ تذكرة موحدة — استلام الحقائب في دمشق (${kg} كغ)`,
+  get noMatchingFlightsTitle(): string {
+    return formatNoMatchingFlightsTitle();
+  },
+  get noMatchingFlightsBody(): string {
+    return formatNoMatchingFlightsBody();
+  },
+  baggageVerifiedTemplate: (
+    kg: number,
+    destinationIataOrNameAr?: string
+  ): string => {
+    const destNameAr = destinationIataOrNameAr
+      ? getAirportNameAr(destinationIataOrNameAr)
+      : getAirportNameAr(env.DESTINATION_IATA);
+    return formatBaggageVerifiedText(kg, destNameAr);
+  },
   baggageUnverifiedWarning:
     "⚠️ تذكرة موحدة — تحقق من وزن الحقيبة قبل الحجز",
-  baggageSingleTicketConfirm:
-    "تأكيد: شحن الحقائب مباشرة إلى دمشق بدون استلام في الترانزيت",
+  get baggageSingleTicketConfirm(): string {
+    return formatSingleTicketConfirmText();
+  },
   telegramTestSuccess: "✅ تم ربط البوت بنجاح",
   emailFooterNote:
     "جميع الرحلات المعروضة أعلاه مفحوصة آلياً: تذكرة موحدة (Single PNR) بدون إعادة تسليم الحقائب في مطار الترانزيت.",
 } as const;
-
-export const AIRPORT_ARABIC_NAMES: Readonly<Record<string, string>> = {
-  KUL: "كوالالمبور",
-  DAM: "دمشق",
-  DOH: "الدوحة",
-  IST: "إسطنبول",
-  SAW: "إسطنبول صبيحة",
-  DXB: "دبي",
-  SHJ: "الشارقة",
-  AUH: "أبوظبي",
-  AMM: "عمّان",
-  BAH: "البحرين",
-  MCT: "مسقط",
-  KWI: "الكويت",
-  CAI: "القاهرة",
-  JED: "جدة",
-  RUH: "الرياض",
-  BGW: "بغداد",
-  BEY: "بيروت",
-};
 
 /**
  * Escapes dynamic values for safe inclusion in Telegram HTML and Email HTML.
@@ -134,12 +188,7 @@ export function formatFlightDate(dateStr: string): string {
 }
 
 export function formatAirportLabel(iata: string): string {
-  const code = iata.trim().toUpperCase();
-  const arName = AIRPORT_ARABIC_NAMES[code];
-  if (arName) {
-    return `${arName} (${code})`;
-  }
-  return code;
+  return formatAirportWithCode(iata);
 }
 
 /**
@@ -183,19 +232,27 @@ export function formatAirlinesSummary(
 }
 
 /**
- * Formats the Arabic baggage verification badge line per specification:
- * - verified:   "✅ تذكرة موحدة — استلام الحقائب في دمشق (23 كغ)"
+ * Formats the Arabic baggage verification badge line using the destination's Arabic name:
+ * - verified:   "✅ تذكرة موحدة — استلام الحقائب في {destinationNameAr} (23 كغ)"
  * - unverified: "⚠️ تذكرة موحدة — تحقق من وزن الحقيبة قبل الحجز"
  */
 export function formatBaggageLine(
-  offer: Pick<UnifiedFlightOffer, "checkedBaggageKg" | "baggageVerified">
+  offer: Pick<UnifiedFlightOffer, "checkedBaggageKg" | "baggageVerified"> & {
+    destination?: string;
+  },
+  destinationIata?: string
 ): string {
   if (
     offer.baggageVerified &&
     typeof offer.checkedBaggageKg === "number" &&
     offer.checkedBaggageKg > 0
   ) {
-    return ARABIC_STRINGS.baggageVerifiedTemplate(offer.checkedBaggageKg);
+    const destCode =
+      destinationIata?.trim() ||
+      offer.destination?.trim() ||
+      env.DESTINATION_IATA;
+    const destinationNameAr = getAirportNameAr(destCode);
+    return formatBaggageVerifiedText(offer.checkedBaggageKg, destinationNameAr);
   }
   return ARABIC_STRINGS.baggageUnverifiedWarning;
 }
@@ -208,4 +265,3 @@ export function isValidHttpUrl(url: string): boolean {
     return false;
   }
 }
-

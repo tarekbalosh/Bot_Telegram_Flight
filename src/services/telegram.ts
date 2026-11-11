@@ -8,13 +8,16 @@ import {
   escapeHtml,
   formatAirlinesSummary,
   formatBaggageLine,
-  formatFlightDate,
+  formatNoMatchingFlightsBody,
+  formatNoMatchingFlightsTitle,
   formatPrice,
+  formatReportTitle,
+  formatRouteHeader,
   formatTransitSummary,
   isValidHttpUrl,
   wrapLtr,
 } from "./format";
-import { getEffectiveTarget } from "./settings";
+import { getEffectiveRoute, getEffectiveTarget } from "./settings";
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
@@ -137,12 +140,26 @@ export function buildInlineKeyboard(
 
 export function renderTelegramHeaderHtml(
   topFlights: UnifiedFlightOffer[],
-  targetPriceMyr: number = env.TARGET_PRICE_MYR
+  targetPriceMyr: number = env.TARGET_PRICE_MYR,
+  route?: { origin?: string; destination?: string }
 ): string {
+  const originIata = (
+    route?.origin ||
+    topFlights[0]?.origin ||
+    env.ORIGIN_IATA
+  ).toUpperCase();
+  const destinationIata = (
+    route?.destination ||
+    topFlights[0]?.destination ||
+    env.DESTINATION_IATA
+  ).toUpperCase();
+
   if (topFlights.length === 0) {
     return [
-      `<b>${escapeHtml(ARABIC_STRINGS.noMatchingFlightsTitle)}</b>`,
-      escapeHtml(ARABIC_STRINGS.noMatchingFlightsBody),
+      `<b>${escapeHtml(
+        formatNoMatchingFlightsTitle(originIata, destinationIata)
+      )}</b>`,
+      escapeHtml(formatNoMatchingFlightsBody(destinationIata)),
     ].join("\n\n");
   }
 
@@ -163,8 +180,8 @@ export function renderTelegramHeaderHtml(
   )} (${escapeHtml(wrapLtr(`$${formatPrice(lowest.priceUSD)} USD`))})`;
 
   return [
-    `<b>${escapeHtml(ARABIC_STRINGS.reportTitle)}</b>`,
-    escapeHtml(ARABIC_STRINGS.routeHeader),
+    `<b>${escapeHtml(formatReportTitle(originIata, destinationIata))}</b>`,
+    escapeHtml(formatRouteHeader(originIata, destinationIata)),
     lowestLine,
     targetStatus,
   ].join("\n");
@@ -172,7 +189,8 @@ export function renderTelegramHeaderHtml(
 
 export function renderItineraryBlockHtml(
   group: GroupedFlightItinerary,
-  index: number
+  index: number,
+  destinationIata?: string
 ): string {
   const rank = index + 1;
   const flight = group.representative;
@@ -196,7 +214,7 @@ export function renderItineraryBlockHtml(
   const transitText = escapeHtml(
     formatTransitSummary(flight.transitAirports, flight.layoverDurationsHours)
   );
-  const baggageBadge = escapeHtml(formatBaggageLine(flight));
+  const baggageBadge = escapeHtml(formatBaggageLine(flight, destinationIata));
 
   const linkUrl = flight.bookingLink?.trim() || "";
   const linkPart = isValidHttpUrl(linkUrl)
@@ -225,7 +243,8 @@ export function renderSingleFlightBlockHtml(
       departureClock: extractTimeOfDay(flight.departureTime),
       arrivalClock: extractTimeOfDay(flight.arrivalTime),
     },
-    index
+    index,
+    flight.destination
   );
 }
 
@@ -240,6 +259,8 @@ export function buildTelegramPayloads(
     targetPriceMyr?: number;
     maxLen?: number;
     topN?: number;
+    originIata?: string;
+    destinationIata?: string;
   }
 ): TelegramMessagePayload[] {
   const maxLen = options?.maxLen ?? TELEGRAM_MAX_MESSAGE_LENGTH;
@@ -248,14 +269,28 @@ export function buildTelegramPayloads(
 
   const topGroups = groupOffersByItinerary(offers, topN);
   const representativeFlights = topGroups.map((g) => g.representative);
-  const header = renderTelegramHeaderHtml(representativeFlights, targetPriceMyr);
+  const originIata =
+    options?.originIata || representativeFlights[0]?.origin || env.ORIGIN_IATA;
+  const destinationIata =
+    options?.destinationIata ||
+    representativeFlights[0]?.destination ||
+    env.DESTINATION_IATA;
+
+  const header = renderTelegramHeaderHtml(
+    representativeFlights,
+    targetPriceMyr,
+    {
+      origin: originIata,
+      destination: destinationIata,
+    }
+  );
 
   if (topGroups.length === 0) {
     return [{ text: header.slice(0, maxLen) }];
   }
 
   const flightBlocks = topGroups.map((group, i) =>
-    renderItineraryBlockHtml(group, i)
+    renderItineraryBlockHtml(group, i, destinationIata)
   );
   const keyboard = buildInlineKeyboard(representativeFlights);
 
@@ -291,7 +326,10 @@ export function buildTelegramPayloads(
   });
 }
 
-function classifyTelegramError(status: number | undefined, description?: string): string {
+function classifyTelegramError(
+  status: number | undefined,
+  description?: string
+): string {
   const desc = description ? ` (${description})` : "";
   if (status === 401 || status === 404) {
     return `Invalid Telegram bot token (HTTP ${status})${desc}. Verify TELEGRAM_BOT_TOKEN with @BotFather.`;
@@ -371,19 +409,35 @@ export async function sendTelegramReport(
   options?: {
     dryRun?: boolean;
     targetPriceMyr?: number;
+    originIata?: string;
+    destinationIata?: string;
   }
 ): Promise<NotificationResult> {
   try {
-    const resolvedTargetPriceMyr =
-      options?.targetPriceMyr ??
-      (options?.dryRun ? env.TARGET_PRICE_MYR : await getEffectiveTarget());
+    const [resolvedTargetPriceMyr, effectiveRoute] = await Promise.all([
+      options?.targetPriceMyr !== undefined
+        ? Promise.resolve(options.targetPriceMyr)
+        : options?.dryRun
+        ? Promise.resolve(env.TARGET_PRICE_MYR)
+        : getEffectiveTarget(),
+      options?.originIata && options?.destinationIata
+        ? Promise.resolve({
+            origin: options.originIata,
+            destination: options.destinationIata,
+          })
+        : getEffectiveRoute(options?.dryRun ? { store: null } : undefined),
+    ]);
 
     const payloads = buildTelegramPayloads(offers, {
       targetPriceMyr: resolvedTargetPriceMyr,
+      originIata: options?.originIata || effectiveRoute.origin,
+      destinationIata: options?.destinationIata || effectiveRoute.destination,
     });
 
     if (options?.dryRun) {
-      console.log("\n================ [DRY-RUN] TELEGRAM REPORT (ARABIC) ================");
+      console.log(
+        "\n================ [DRY-RUN] TELEGRAM REPORT (ARABIC) ================"
+      );
       payloads.forEach((p, i) => {
         if (payloads.length > 1) {
           console.log(`--- Message ${i + 1} / ${payloads.length} ---`);
@@ -396,7 +450,9 @@ export async function sendTelegramReport(
           );
         }
       });
-      console.log("====================================================================\n");
+      console.log(
+        "====================================================================\n"
+      );
       return { ok: true };
     }
 
@@ -419,13 +475,14 @@ export async function sendTelegramReport(
 
     logger.info("Telegram report sent successfully", {
       messagesSent: payloads.length,
-      itinerariesIncluded: groupOffersByItinerary(offers, env.TELEGRAM_TOP_N).length,
+      itinerariesIncluded: groupOffersByItinerary(offers, env.TELEGRAM_TOP_N)
+        .length,
     });
     return { ok: true };
   } catch (err) {
-    const errorMsg = err instanceof Error ? maskSecrets(err.message) : String(err);
+    const errorMsg =
+      err instanceof Error ? maskSecrets(err.message) : String(err);
     logger.error("Unexpected error in sendTelegramReport", { error: errorMsg });
     return { ok: false, error: errorMsg };
   }
 }
-

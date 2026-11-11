@@ -6,13 +6,29 @@ import {
   telegramConfigured,
 } from "../config/env";
 import { fetchAllOffers } from "../providers";
+import { UnifiedFlightOffer } from "../types/flight";
+import {
+  RouteInfo,
+  splitDatesPerRunAcrossRoutes,
+} from "../utils/airports";
 import { logger } from "../utils/logger";
 import { sendEmailReport } from "./email";
-import { filterStrictDamascusFlights } from "./filter";
-import { getEffectiveTarget } from "./settings";
+import { filterStrictFlights } from "./filter";
+import {
+  EffectiveDates,
+  getEffectiveDates,
+  getEffectiveRoute,
+  getEffectiveTarget,
+  getEffectiveWatchRoutes,
+} from "./settings";
 import { sendTelegramReport } from "./telegram";
 
-export { getEffectiveTarget } from "./settings";
+export {
+  getEffectiveDates,
+  getEffectiveRoute,
+  getEffectiveTarget,
+  getEffectiveWatchRoutes,
+} from "./settings";
 
 export type NotificationReason = "FORCED" | "NEW_LOW" | "TARGET_HIT" | "DAILY";
 
@@ -20,6 +36,16 @@ export interface TrackerRunOptions {
   forceNotify?: boolean;
   dryRun?: boolean;
   noNotify?: boolean;
+  routes?: RouteInfo[];
+}
+
+export interface RouteRunSummary {
+  routeKey: string;
+  rawCount: number;
+  validCount: number;
+  lowestPriceMYR: number | null;
+  notified: string[];
+  reason?: NotificationReason | null;
 }
 
 export interface TrackerRunSummary {
@@ -29,6 +55,24 @@ export interface TrackerRunSummary {
   notified: string[];
   reason?: NotificationReason | null;
   skippedMutex?: boolean;
+  routeSummaries?: RouteRunSummary[];
+}
+
+export interface RoutePersistenceStore {
+  getRouteHistory(routeKey: string): Promise<{
+    previousLowestMyr: number | null;
+    lastNotification: { lowestPriceMYR: number; sentAt: Date } | null;
+  }>;
+  persistRouteOffers(
+    routeKey: string,
+    validOffers: UnifiedFlightOffer[]
+  ): Promise<void>;
+  recordNotification(params: {
+    routeKey: string;
+    lowestPriceMYR: number;
+    channel: string;
+    reason: NotificationReason;
+  }): Promise<void>;
 }
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -93,6 +137,342 @@ export function decideNotificationReason(params: {
   return null;
 }
 
+export function createPrismaRouteStore(): RoutePersistenceStore {
+  return {
+    async getRouteHistory(routeKey: string) {
+      const prisma = getPrisma();
+      const [minSnapshotAgg, latestNotif] = await Promise.all([
+        prisma.priceSnapshot.aggregate({
+          where: { route: routeKey },
+          _min: { priceMYR: true },
+        }),
+        prisma.notificationLog.findFirst({
+          where: { route: routeKey },
+          orderBy: { sentAt: "desc" },
+          select: { lowestPriceMYR: true, sentAt: true },
+        }),
+      ]);
+
+      return {
+        previousLowestMyr: minSnapshotAgg._min.priceMYR ?? null,
+        lastNotification: latestNotif ?? null,
+      };
+    },
+
+    async persistRouteOffers(
+      routeKey: string,
+      validOffers: UnifiedFlightOffer[]
+    ) {
+      if (validOffers.length === 0) {
+        return;
+      }
+      const prisma = getPrisma();
+      await prisma.$transaction(
+        validOffers.flatMap((offer) => [
+          prisma.flightOfferRecord.upsert({
+            where: { externalId: offer.externalId },
+            create: {
+              externalId: offer.externalId,
+              route: routeKey,
+              provider: offer.provider,
+              priceMYR: offer.priceMYR,
+              priceUSD: offer.priceUSD,
+              departureDate: offer.departureDate,
+              departureTime: offer.departureTime,
+              arrivalTime: offer.arrivalTime,
+              airlines: offer.airlines,
+              flightNumbers: offer.flightNumbers,
+              transitAirports: offer.transitAirports,
+              layoverDurationsHours: offer.layoverDurationsHours,
+              totalDurationHours: offer.totalDurationHours,
+              checkedBaggageKg: offer.checkedBaggageKg,
+              baggageVerified: offer.baggageVerified,
+              isSinglePNR: offer.isSinglePNR,
+              bagsRecheckRequired: offer.bagsRecheckRequired,
+              bookingLink: offer.bookingLink,
+            },
+            update: {
+              route: routeKey,
+              provider: offer.provider,
+              priceMYR: offer.priceMYR,
+              priceUSD: offer.priceUSD,
+              departureDate: offer.departureDate,
+              departureTime: offer.departureTime,
+              arrivalTime: offer.arrivalTime,
+              airlines: offer.airlines,
+              flightNumbers: offer.flightNumbers,
+              transitAirports: offer.transitAirports,
+              layoverDurationsHours: offer.layoverDurationsHours,
+              totalDurationHours: offer.totalDurationHours,
+              checkedBaggageKg: offer.checkedBaggageKg,
+              baggageVerified: offer.baggageVerified,
+              isSinglePNR: offer.isSinglePNR,
+              bagsRecheckRequired: offer.bagsRecheckRequired,
+              bookingLink: offer.bookingLink,
+            },
+          }),
+          prisma.priceSnapshot.create({
+            data: {
+              externalId: offer.externalId,
+              route: routeKey,
+              priceMYR: offer.priceMYR,
+            },
+          }),
+        ])
+      );
+    },
+
+    async recordNotification({ routeKey, lowestPriceMYR, channel, reason }) {
+      const prisma = getPrisma();
+      await prisma.notificationLog.create({
+        data: {
+          route: routeKey,
+          lowestPriceMYR,
+          channel,
+          reason,
+        },
+      });
+    },
+  };
+}
+
+export async function executeSingleRouteRun(params: {
+  route: RouteInfo;
+  dates: EffectiveDates;
+  datesPerRun: number;
+  targetPriceMyr: number;
+  dryRun: boolean;
+  forceNotify: boolean;
+  noNotify: boolean;
+  store?: RoutePersistenceStore;
+  fetchOffersFn?: (opts: {
+    dryRun: boolean;
+    originIata: string;
+    destinationIata: string;
+    dateFrom: string;
+    dateTo: string;
+    datesPerRun: number;
+  }) => Promise<UnifiedFlightOffer[]>;
+  notifyTelegramFn?: (
+    offers: UnifiedFlightOffer[],
+    opts: {
+      dryRun: boolean;
+      targetPriceMyr: number;
+      originIata: string;
+      destinationIata: string;
+    }
+  ) => Promise<{ ok: boolean }>;
+  notifyEmailFn?: (
+    offers: UnifiedFlightOffer[],
+    opts: {
+      dryRun: boolean;
+      targetPriceMyr: number;
+      originIata: string;
+      destinationIata: string;
+    }
+  ) => Promise<{ ok: boolean }>;
+}): Promise<RouteRunSummary> {
+  const {
+    route,
+    dates,
+    datesPerRun,
+    targetPriceMyr,
+    dryRun,
+    forceNotify,
+    noNotify,
+  } = params;
+
+  const fetchFn = params.fetchOffersFn ?? fetchAllOffers;
+  const rawOffers = await fetchFn({
+    dryRun,
+    originIata: route.origin,
+    destinationIata: route.destination,
+    dateFrom: dates.dateFrom,
+    dateTo: dates.dateTo,
+    datesPerRun,
+  });
+
+  const validOffers = filterStrictFlights(rawOffers, {
+    originIata: route.origin,
+    destinationIata: route.destination,
+    dateFrom: dates.dateFrom,
+    dateTo: dates.dateTo,
+  });
+
+  const currentLowestMyr =
+    validOffers.length > 0 ? validOffers[0].priceMYR : null;
+
+  logger.info("Flight offers fetched and filtered for route", {
+    route: route.routeKey,
+    rawCount: rawOffers.length,
+    validCount: validOffers.length,
+    lowestPriceMYR: currentLowestMyr,
+  });
+
+  let previousLowestMyr: number | null = null;
+  let lastNotification: { lowestPriceMYR: number; sentAt: Date } | null = null;
+  const store =
+    params.store ?? (!dryRun ? createPrismaRouteStore() : undefined);
+
+  if (store) {
+    const history = await store.getRouteHistory(route.routeKey);
+    previousLowestMyr = history.previousLowestMyr;
+    lastNotification = history.lastNotification;
+
+    logger.info("Historical state read prior to persistence", {
+      route: route.routeKey,
+      previousLowestMyr,
+      lastNotifiedPriceMYR: lastNotification?.lowestPriceMYR ?? null,
+      lastNotifiedAt: lastNotification?.sentAt?.toISOString() ?? null,
+    });
+
+    if (validOffers.length > 0) {
+      await store.persistRouteOffers(route.routeKey, validOffers);
+      logger.info("Persisted valid offers and price snapshots", {
+        route: route.routeKey,
+        offersUpserted: validOffers.length,
+        snapshotsInserted: validOffers.length,
+      });
+    }
+  }
+
+  if (noNotify) {
+    logger.info("Notifications suppressed via --no-notify flag.", {
+      route: route.routeKey,
+    });
+    return {
+      routeKey: route.routeKey,
+      rawCount: rawOffers.length,
+      validCount: validOffers.length,
+      lowestPriceMYR: currentLowestMyr,
+      notified: [],
+      reason: null,
+    };
+  }
+
+  const reason = decideNotificationReason({
+    validCount: validOffers.length,
+    currentLowestMyr,
+    previousLowestMyr,
+    lastNotification,
+    targetPriceMyr,
+    forceNotify,
+  });
+
+  if (!reason) {
+    logger.info("No notification trigger met for route", {
+      route: route.routeKey,
+      currentLowestMyr,
+      previousLowestMyr,
+      targetPriceMyr,
+    });
+    return {
+      routeKey: route.routeKey,
+      rawCount: rawOffers.length,
+      validCount: validOffers.length,
+      lowestPriceMYR: currentLowestMyr,
+      notified: [],
+      reason: null,
+    };
+  }
+
+  logger.info("Notification triggered for route", {
+    route: route.routeKey,
+    reason,
+    currentLowestMyr,
+    previousLowestMyr,
+    targetPriceMyr,
+  });
+
+  const notified: string[] = [];
+  const notifyTg = params.notifyTelegramFn ?? sendTelegramReport;
+  const notifyMail = params.notifyEmailFn ?? sendEmailReport;
+
+  if (dryRun) {
+    const [tgRes, emailRes] = await Promise.all([
+      notifyTg(validOffers, {
+        dryRun: true,
+        targetPriceMyr,
+        originIata: route.origin,
+        destinationIata: route.destination,
+      }),
+      notifyMail(validOffers, {
+        dryRun: true,
+        targetPriceMyr,
+        originIata: route.origin,
+        destinationIata: route.destination,
+      }),
+    ]);
+    if (tgRes.ok) notified.push("TELEGRAM");
+    if (emailRes.ok) notified.push("EMAIL");
+  } else {
+    const tasks: Promise<void>[] = [];
+
+    if (telegramConfigured() || params.notifyTelegramFn) {
+      tasks.push(
+        (async () => {
+          const res = await notifyTg(validOffers, {
+            dryRun: false,
+            targetPriceMyr,
+            originIata: route.origin,
+            destinationIata: route.destination,
+          });
+          if (res.ok) {
+            notified.push("TELEGRAM");
+            if (store) {
+              await store.recordNotification({
+                routeKey: route.routeKey,
+                lowestPriceMYR: currentLowestMyr ?? 0,
+                channel: "TELEGRAM",
+                reason,
+              });
+            }
+          }
+        })()
+      );
+    } else {
+      logger.warn("Skipping Telegram delivery: channel not configured.");
+    }
+
+    if (emailConfigured() || params.notifyEmailFn) {
+      tasks.push(
+        (async () => {
+          const res = await notifyMail(validOffers, {
+            dryRun: false,
+            targetPriceMyr,
+            originIata: route.origin,
+            destinationIata: route.destination,
+          });
+          if (res.ok) {
+            notified.push("EMAIL");
+            if (store) {
+              await store.recordNotification({
+                routeKey: route.routeKey,
+                lowestPriceMYR: currentLowestMyr ?? 0,
+                channel: "EMAIL",
+                reason,
+              });
+            }
+          }
+        })()
+      );
+    } else {
+      logger.warn("Skipping Email delivery: channel not configured.");
+    }
+
+    await Promise.allSettled(tasks);
+  }
+
+  return {
+    routeKey: route.routeKey,
+    rawCount: rawOffers.length,
+    validCount: validOffers.length,
+    lowestPriceMYR: currentLowestMyr,
+    notified,
+    reason,
+  };
+}
+
 export async function runFlightTrackerAgent(
   options: TrackerRunOptions = {}
 ): Promise<TrackerRunSummary> {
@@ -116,252 +496,84 @@ export async function runFlightTrackerAgent(
   const noNotify = Boolean(options.noNotify);
 
   try {
+    if (!dryRun) {
+      assertLiveReady();
+    }
+
+    const [watchedRoutes, effectiveDates, effectiveTargetMyr] =
+      await Promise.all([
+        options.routes
+          ? Promise.resolve(options.routes)
+          : getEffectiveWatchRoutes(dryRun ? { store: null } : undefined),
+        getEffectiveDates(dryRun ? { store: null } : undefined),
+        dryRun ? Promise.resolve(env.TARGET_PRICE_MYR) : getEffectiveTarget(),
+      ]);
+
+    const datesAllocations = splitDatesPerRunAcrossRoutes(
+      env.SERPAPI_DATES_PER_RUN,
+      watchedRoutes.length
+    );
+
     logger.info("Starting Flight Tracker Agent run", {
-      origin: env.ORIGIN_IATA,
-      destination: env.DESTINATION_IATA,
-      dateFrom: env.DATE_FROM,
-      dateTo: env.DATE_TO,
+      routes: watchedRoutes.map((r) => r.routeKey),
+      datesAllocations,
+      dateFrom: effectiveDates.dateFrom,
+      dateTo: effectiveDates.dateTo,
       dryRun,
       forceNotify,
       noNotify,
     });
 
-    // 1. Validate live readiness unless dry run
-    if (!dryRun) {
-      assertLiveReady();
-    }
+    const routeSummaries: RouteRunSummary[] = [];
 
-    // 2. Fetch raw offers from configured providers (or mock) and filter strictly
-    const rawOffers = await fetchAllOffers({ dryRun });
-    const validOffers = filterStrictDamascusFlights(rawOffers);
+    for (let i = 0; i < watchedRoutes.length; i++) {
+      const route = watchedRoutes[i];
+      const datesPerRun = datesAllocations[i] ?? 0;
 
-    const currentLowestMyr =
-      validOffers.length > 0 ? validOffers[0].priceMYR : null;
-
-    logger.info("Flight offers fetched and filtered", {
-      rawCount: rawOffers.length,
-      validCount: validOffers.length,
-      lowestPriceMYR: currentLowestMyr,
-    });
-
-    let previousLowestMyr: number | null = null;
-    let lastNotification: { lowestPriceMYR: number; sentAt: Date } | null = null;
-
-    // 3. Read previous lowest price FIRST (and last NotificationLog) BEFORE writing this run's data
-    if (!dryRun) {
-      const prisma = getPrisma();
-      const [minSnapshotAgg, latestNotif] = await Promise.all([
-        prisma.priceSnapshot.aggregate({
-          _min: { priceMYR: true },
-        }),
-        prisma.notificationLog.findFirst({
-          orderBy: { sentAt: "desc" },
-          select: { lowestPriceMYR: true, sentAt: true },
-        }),
-      ]);
-
-      previousLowestMyr = minSnapshotAgg._min.priceMYR ?? null;
-      lastNotification = latestNotif ?? null;
-
-      logger.info("Historical state read prior to persistence", {
-        previousLowestMyr,
-        lastNotifiedPriceMYR: lastNotification?.lowestPriceMYR ?? null,
-        lastNotifiedAt: lastNotification?.sentAt?.toISOString() ?? null,
-      });
-
-      // 4. Upsert valid offers into FlightOfferRecord and insert a PriceSnapshot per offer in a transaction
-      if (validOffers.length > 0) {
-        await prisma.$transaction(
-          validOffers.flatMap((offer) => [
-            prisma.flightOfferRecord.upsert({
-              where: { externalId: offer.externalId },
-              create: {
-                externalId: offer.externalId,
-                provider: offer.provider,
-                priceMYR: offer.priceMYR,
-                priceUSD: offer.priceUSD,
-                departureDate: offer.departureDate,
-                departureTime: offer.departureTime,
-                arrivalTime: offer.arrivalTime,
-                airlines: offer.airlines,
-                flightNumbers: offer.flightNumbers,
-                transitAirports: offer.transitAirports,
-                layoverDurationsHours: offer.layoverDurationsHours,
-                totalDurationHours: offer.totalDurationHours,
-                checkedBaggageKg: offer.checkedBaggageKg,
-                baggageVerified: offer.baggageVerified,
-                isSinglePNR: offer.isSinglePNR,
-                bagsRecheckRequired: offer.bagsRecheckRequired,
-                bookingLink: offer.bookingLink,
-              },
-              update: {
-                provider: offer.provider,
-                priceMYR: offer.priceMYR,
-                priceUSD: offer.priceUSD,
-                departureDate: offer.departureDate,
-                departureTime: offer.departureTime,
-                arrivalTime: offer.arrivalTime,
-                airlines: offer.airlines,
-                flightNumbers: offer.flightNumbers,
-                transitAirports: offer.transitAirports,
-                layoverDurationsHours: offer.layoverDurationsHours,
-                totalDurationHours: offer.totalDurationHours,
-                checkedBaggageKg: offer.checkedBaggageKg,
-                baggageVerified: offer.baggageVerified,
-                isSinglePNR: offer.isSinglePNR,
-                bagsRecheckRequired: offer.bagsRecheckRequired,
-                bookingLink: offer.bookingLink,
-              },
-            }),
-            prisma.priceSnapshot.create({
-              data: {
-                externalId: offer.externalId,
-                priceMYR: offer.priceMYR,
-              },
-            }),
-          ])
-        );
-
-        logger.info("Persisted valid offers and price snapshots", {
-          offersUpserted: validOffers.length,
-          snapshotsInserted: validOffers.length,
-        });
-      }
-    }
-
-    // 5 & 6. Decide notification
-    if (noNotify) {
-      logger.info("Notifications suppressed via --no-notify flag.");
-      return {
-        rawCount: rawOffers.length,
-        validCount: validOffers.length,
-        lowestPriceMYR: currentLowestMyr,
-        notified: [],
-        reason: null,
-      };
-    }
-
-    const effectiveTargetMyr = dryRun
-      ? env.TARGET_PRICE_MYR
-      : await getEffectiveTarget();
-
-    const reason = decideNotificationReason({
-      validCount: validOffers.length,
-      currentLowestMyr,
-      previousLowestMyr,
-      lastNotification,
-      targetPriceMyr: effectiveTargetMyr,
-      forceNotify,
-    });
-
-    if (!reason) {
-      logger.info("No notification trigger met for this run", {
-        currentLowestMyr,
-        previousLowestMyr,
+      const summary = await executeSingleRouteRun({
+        route,
+        dates: effectiveDates,
+        datesPerRun,
         targetPriceMyr: effectiveTargetMyr,
+        dryRun,
+        forceNotify,
+        noNotify,
       });
-      return {
-        rawCount: rawOffers.length,
-        validCount: validOffers.length,
-        lowestPriceMYR: currentLowestMyr,
-        notified: [],
-        reason: null,
-      };
+
+      routeSummaries.push(summary);
     }
 
-    logger.info("Notification triggered", {
-      reason,
-      currentLowestMyr,
-      previousLowestMyr,
-      targetPriceMyr: effectiveTargetMyr,
-    });
-
-    // 7. Send Telegram and Email independently
-    const notified: string[] = [];
-
-    if (dryRun) {
-      const [tgRes, emailRes] = await Promise.all([
-        sendTelegramReport(validOffers, {
-          dryRun: true,
-          targetPriceMyr: effectiveTargetMyr,
-        }),
-        sendEmailReport(validOffers, {
-          dryRun: true,
-          targetPriceMyr: effectiveTargetMyr,
-        }),
-      ]);
-      if (tgRes.ok) notified.push("TELEGRAM");
-      if (emailRes.ok) notified.push("EMAIL");
-    } else {
-      const prisma = getPrisma();
-      const tasks: Promise<void>[] = [];
-
-      if (telegramConfigured()) {
-        tasks.push(
-          (async () => {
-            const res = await sendTelegramReport(validOffers, {
-              dryRun: false,
-              targetPriceMyr: effectiveTargetMyr,
-            });
-            if (res.ok) {
-              notified.push("TELEGRAM");
-              await prisma.notificationLog.create({
-                data: {
-                  lowestPriceMYR: currentLowestMyr ?? 0,
-                  channel: "TELEGRAM",
-                  reason,
-                },
-              });
-            }
-          })()
-        );
-      } else {
-        logger.warn("Skipping Telegram delivery: channel not configured.");
-      }
-
-      if (emailConfigured()) {
-        tasks.push(
-          (async () => {
-            const res = await sendEmailReport(validOffers, {
-              dryRun: false,
-              targetPriceMyr: effectiveTargetMyr,
-            });
-            if (res.ok) {
-              notified.push("EMAIL");
-              await prisma.notificationLog.create({
-                data: {
-                  lowestPriceMYR: currentLowestMyr ?? 0,
-                  channel: "EMAIL",
-                  reason,
-                },
-              });
-            }
-          })()
-        );
-      } else {
-        logger.warn("Skipping Email delivery: channel not configured.");
-      }
-
-      await Promise.allSettled(tasks);
-    }
+    const totalRaw = routeSummaries.reduce((acc, s) => acc + s.rawCount, 0);
+    const totalValid = routeSummaries.reduce((acc, s) => acc + s.validCount, 0);
+    const allLowest = routeSummaries
+      .map((s) => s.lowestPriceMYR)
+      .filter((p): p is number => p !== null);
+    const overallLowest =
+      allLowest.length > 0 ? Math.min(...allLowest) : null;
+    const allNotified = Array.from(
+      new Set(routeSummaries.flatMap((s) => s.notified))
+    );
+    const firstReason =
+      routeSummaries.find((s) => s.reason)?.reason ?? null;
 
     logger.info("Flight Tracker Agent run completed", {
-      rawCount: rawOffers.length,
-      validCount: validOffers.length,
-      lowestPriceMYR: currentLowestMyr,
-      reason,
-      notified,
+      routesChecked: routeSummaries.map((s) => s.routeKey),
+      rawCount: totalRaw,
+      validCount: totalValid,
+      lowestPriceMYR: overallLowest,
+      reason: firstReason,
+      notified: allNotified,
     });
 
     return {
-      rawCount: rawOffers.length,
-      validCount: validOffers.length,
-      lowestPriceMYR: currentLowestMyr,
-      notified,
-      reason,
+      rawCount: totalRaw,
+      validCount: totalValid,
+      lowestPriceMYR: overallLowest,
+      notified: allNotified,
+      reason: firstReason,
+      routeSummaries,
     };
   } finally {
     isRunInProgress = false;
   }
 }
-

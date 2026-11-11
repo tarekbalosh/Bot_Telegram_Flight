@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { filterStrictDamascusFlights, FilterConfig } from "../services/filter";
+import { filterStrictFlights, FilterConfig } from "../services/filter";
 import { UnifiedFlightOffer } from "../types/flight";
 import { buildExternalId } from "../utils/hash";
 
 const testConfig: FilterConfig = {
-  originIata: "KUL",
-  destinationIata: "DAM",
+  originIata: "SIN",
+  destinationIata: "CAI",
   dateFrom: "2026-12-01",
   dateTo: "2026-12-31",
   minLayoverHours: 2,
@@ -15,12 +15,14 @@ const testConfig: FilterConfig = {
   baggageUnknownPolicy: "flag",
 };
 
-function makeOffer(overrides: Partial<UnifiedFlightOffer> = {}): UnifiedFlightOffer {
+function makeOffer(
+  overrides: Partial<UnifiedFlightOffer> = {}
+): UnifiedFlightOffer {
   const base: UnifiedFlightOffer = {
     externalId: "",
     provider: "SERPAPI",
-    origin: "KUL",
-    destination: "DAM",
+    origin: "SIN",
+    destination: "CAI",
     priceMYR: 2100,
     priceUSD: 462,
     departureDate: "2026-12-10",
@@ -44,22 +46,22 @@ function makeOffer(overrides: Partial<UnifiedFlightOffer> = {}): UnifiedFlightOf
   return base;
 }
 
-describe("filterStrictDamascusFlights", () => {
+describe("filterStrictFlights", () => {
   it("rejects self-transfer itineraries (isSinglePNR === false)", () => {
     const offer = makeOffer({ isSinglePNR: false });
-    const result = filterStrictDamascusFlights([offer], testConfig);
+    const result = filterStrictFlights([offer], testConfig);
     assert.equal(result.length, 0);
   });
 
   it("rejects itineraries requiring bag re-check (bagsRecheckRequired === true)", () => {
     const offer = makeOffer({ bagsRecheckRequired: true });
-    const result = filterStrictDamascusFlights([offer], testConfig);
+    const result = filterStrictFlights([offer], testConfig);
     assert.equal(result.length, 0);
   });
 
   it("rejects itineraries with checked baggage below minimum (15 kg < 20 kg)", () => {
     const offer = makeOffer({ checkedBaggageKg: 15, baggageVerified: true });
-    const result = filterStrictDamascusFlights([offer], testConfig);
+    const result = filterStrictFlights([offer], testConfig);
     assert.equal(result.length, 0);
   });
 
@@ -69,7 +71,7 @@ describe("filterStrictDamascusFlights", () => {
       baggageVerified: true,
     });
 
-    const flagged = filterStrictDamascusFlights([unknownOffer], {
+    const flagged = filterStrictFlights([unknownOffer], {
       ...testConfig,
       baggageUnknownPolicy: "flag",
     });
@@ -77,7 +79,7 @@ describe("filterStrictDamascusFlights", () => {
     assert.equal(flagged[0].checkedBaggageKg, null);
     assert.equal(flagged[0].baggageVerified, false);
 
-    const rejected = filterStrictDamascusFlights([unknownOffer], {
+    const rejected = filterStrictFlights([unknownOffer], {
       ...testConfig,
       baggageUnknownPolicy: "reject",
     });
@@ -86,7 +88,7 @@ describe("filterStrictDamascusFlights", () => {
 
   it("rejects itineraries with layovers exceeding MAX_LAYOVER_HOURS (12 h > 10 h)", () => {
     const offer = makeOffer({ layoverDurationsHours: [2.5, 12.0] });
-    const result = filterStrictDamascusFlights([offer], testConfig);
+    const result = filterStrictFlights([offer], testConfig);
     assert.equal(result.length, 0);
   });
 
@@ -101,7 +103,7 @@ describe("filterStrictDamascusFlights", () => {
       flightNumbers: ["QR 853", "QR 414"],
     });
 
-    const result = filterStrictDamascusFlights(
+    const result = filterStrictFlights(
       [tooShort, exactMin, exactMax],
       testConfig
     );
@@ -115,11 +117,11 @@ describe("filterStrictDamascusFlights", () => {
   it("rejects out-of-range dates, non-matching airports, and non-positive prices", () => {
     const earlyDate = makeOffer({ departureDate: "2026-11-30" });
     const lateDate = makeOffer({ departureDate: "2027-01-01" });
-    const wrongOrigin = makeOffer({ origin: "SIN" });
+    const wrongOrigin = makeOffer({ origin: "BKK" });
     const wrongDest = makeOffer({ destination: "BEY" });
     const zeroPrice = makeOffer({ priceMYR: 0 });
 
-    const result = filterStrictDamascusFlights(
+    const result = filterStrictFlights(
       [earlyDate, lateDate, wrongOrigin, wrongDest, zeroPrice],
       testConfig
     );
@@ -140,12 +142,11 @@ describe("filterStrictDamascusFlights", () => {
 
     assert.equal(expensive.externalId, cheaper.externalId);
 
-    const deduped = filterStrictDamascusFlights([expensive, cheaper], testConfig);
+    const deduped = filterStrictFlights([expensive, cheaper], testConfig);
     assert.equal(deduped.length, 1);
     assert.equal(deduped[0].priceMYR, 2100);
     assert.equal(deduped[0].provider, "SERPAPI");
 
-    // Equal price tie-breaker: prefer baggageVerified=true
     const unverifiedEqual = makeOffer({
       provider: "SERPAPI",
       priceMYR: 2000,
@@ -158,7 +159,7 @@ describe("filterStrictDamascusFlights", () => {
       checkedBaggageKg: 23,
       baggageVerified: true,
     });
-    const tieResult = filterStrictDamascusFlights(
+    const tieResult = filterStrictFlights(
       [unverifiedEqual, verifiedEqual],
       testConfig
     );
@@ -184,14 +185,10 @@ describe("filterStrictDamascusFlights", () => {
       departureTime: "2026-12-15 09:45",
     });
 
-    const sorted = filterStrictDamascusFlights(
-      [offerA, offerB, offerC],
-      testConfig
-    );
+    const sorted = filterStrictFlights([offerA, offerB, offerC], testConfig);
     assert.deepEqual(
       sorted.map((o) => o.priceMYR),
       [1890, 2200, 2600]
     );
   });
 });
-

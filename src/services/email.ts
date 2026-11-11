@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { Resend } from "resend";
 import { env } from "../config/env";
+import { buildDefaultGoogleFlightsUrl } from "../providers/serpapi";
 import { UnifiedFlightOffer } from "../types/flight";
 import { logger, maskSecrets } from "../utils/logger";
 import {
@@ -10,12 +11,16 @@ import {
   formatAirlinesSummary,
   formatBaggageLine,
   formatFlightDate,
+  formatNoMatchingFlightsBody,
+  formatNoMatchingFlightsTitle,
   formatPrice,
+  formatReportTitle,
+  formatRouteHeader,
   formatTransitSummary,
   isValidHttpUrl,
   wrapLtr,
 } from "./format";
-import { getEffectiveTarget } from "./settings";
+import { getEffectiveRoute, getEffectiveTarget } from "./settings";
 import { NotificationResult } from "./telegram";
 
 export interface RenderedEmailContent {
@@ -24,27 +29,59 @@ export interface RenderedEmailContent {
   text: string;
 }
 
-export function buildEmailSubject(offers: UnifiedFlightOffer[]): string {
+export function buildEmailSubject(
+  offers: UnifiedFlightOffer[],
+  route?: { origin?: string; destination?: string }
+): string {
+  const originIata = (
+    route?.origin ||
+    offers[0]?.origin ||
+    env.ORIGIN_IATA
+  ).toUpperCase();
+  const destinationIata = (
+    route?.destination ||
+    offers[0]?.destination ||
+    env.DESTINATION_IATA
+  ).toUpperCase();
+
   if (offers.length === 0) {
-    return `✈️ ${ARABIC_STRINGS.noMatchingFlightsTitle}`;
+    return `✈️ ${formatNoMatchingFlightsTitle(originIata, destinationIata)}`;
   }
   const lowestPrice = formatPrice(offers[0].priceMYR);
-  return `✈️ أرخص رحلة KUL ➔ DAM: ${lowestPrice} ${ARABIC_STRINGS.myrUnit}`;
+  return `✈️ أرخص رحلة ${originIata} ➔ ${destinationIata}: ${lowestPrice} ${ARABIC_STRINGS.myrUnit}`;
 }
 
 export function renderEmailContent(
   offers: UnifiedFlightOffer[],
-  targetPriceMyr: number = env.TARGET_PRICE_MYR
+  targetPriceMyr: number = env.TARGET_PRICE_MYR,
+  route?: { origin?: string; destination?: string }
 ): RenderedEmailContent {
   const top10 = offers.slice(0, 10);
-  const subject = buildEmailSubject(top10);
+  const originIata = (
+    route?.origin ||
+    top10[0]?.origin ||
+    env.ORIGIN_IATA
+  ).toUpperCase();
+  const destinationIata = (
+    route?.destination ||
+    top10[0]?.destination ||
+    env.DESTINATION_IATA
+  ).toUpperCase();
+
+  const subject = buildEmailSubject(top10, {
+    origin: originIata,
+    destination: destinationIata,
+  });
+  const reportTitle = formatReportTitle(originIata, destinationIata);
+  const routeHeader = formatRouteHeader(originIata, destinationIata);
+  const noFlightsTitle = formatNoMatchingFlightsTitle(
+    originIata,
+    destinationIata
+  );
+  const noFlightsBody = formatNoMatchingFlightsBody(destinationIata);
 
   if (top10.length === 0) {
-    const text = [
-      ARABIC_STRINGS.noMatchingFlightsTitle,
-      "",
-      ARABIC_STRINGS.noMatchingFlightsBody,
-    ].join("\n");
+    const text = [noFlightsTitle, "", noFlightsBody].join("\n");
 
     const html = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -56,10 +93,10 @@ export function renderEmailContent(
 <body style="margin:0;padding:16px;background-color:#f4f6f9;font-family:'Segoe UI',Tahoma,'Noto Sans Arabic',Arial,sans-serif;direction:rtl;text-align:right;color:#1f2937;">
   <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;border:1px solid #e5e7eb;">
     <h1 style="font-size:20px;margin:0 0 12px 0;color:#b91c1c;">${escapeHtml(
-      ARABIC_STRINGS.noMatchingFlightsTitle
+      noFlightsTitle
     )}</h1>
     <p style="font-size:15px;line-height:1.6;margin:0;color:#374151;">${escapeHtml(
-      ARABIC_STRINGS.noMatchingFlightsBody
+      noFlightsBody
     )}</p>
   </div>
 </body>
@@ -81,8 +118,8 @@ export function renderEmailContent(
       })`;
 
   const plainLines: string[] = [
-    ARABIC_STRINGS.reportTitle,
-    ARABIC_STRINGS.routeHeader,
+    reportTitle,
+    routeHeader,
     `${ARABIC_STRINGS.lowestPriceLabel}: ${formatPrice(lowest.priceMYR)} ${
       ARABIC_STRINGS.myrUnit
     } ($${formatPrice(lowest.priceUSD)} USD)`,
@@ -107,7 +144,7 @@ export function renderEmailContent(
         offer.transitAirports,
         offer.layoverDurationsHours
       );
-      const baggageStr = formatBaggageLine(offer);
+      const baggageStr = formatBaggageLine(offer, destinationIata);
 
       const isVerifiedBaggage =
         offer.baggageVerified &&
@@ -118,9 +155,14 @@ export function renderEmailContent(
       const badgeColor = isVerifiedBaggage ? "#065f46" : "#92400e";
       const badgeBorder = isVerifiedBaggage ? "#34d399" : "#f59e0b";
 
+      const fallbackLink = buildDefaultGoogleFlightsUrl(
+        originIata,
+        destinationIata,
+        offer.departureDate
+      );
       const safeLink = isValidHttpUrl(offer.bookingLink)
         ? offer.bookingLink
-        : "https://www.google.com/travel/flights";
+        : fallbackLink;
 
       plainLines.push(
         `#${rank} | ${offer.departureDate} | ${priceMyrStr} (${priceUsdStr})`,
@@ -181,10 +223,10 @@ export function renderEmailContent(
   <div style="max-width:640px;margin:0 auto;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
     <div style="background-color:#0f172a;color:#ffffff;padding:20px 24px;">
       <h1 style="margin:0;font-size:18px;font-weight:700;">${escapeHtml(
-        ARABIC_STRINGS.reportTitle
+        reportTitle
       )}</h1>
       <p style="margin:6px 0 0 0;font-size:13px;color:#cbd5e1;">${escapeHtml(
-        ARABIC_STRINGS.routeHeader
+        routeHeader
       )}</p>
     </div>
 
@@ -241,14 +283,29 @@ export async function sendEmailReport(
   options?: {
     dryRun?: boolean;
     targetPriceMyr?: number;
+    originIata?: string;
+    destinationIata?: string;
   }
 ): Promise<NotificationResult> {
   try {
-    const resolvedTargetPriceMyr =
-      options?.targetPriceMyr ??
-      (options?.dryRun ? env.TARGET_PRICE_MYR : await getEffectiveTarget());
+    const [resolvedTargetPriceMyr, effectiveRoute] = await Promise.all([
+      options?.targetPriceMyr !== undefined
+        ? Promise.resolve(options.targetPriceMyr)
+        : options?.dryRun
+        ? Promise.resolve(env.TARGET_PRICE_MYR)
+        : getEffectiveTarget(),
+      options?.originIata && options?.destinationIata
+        ? Promise.resolve({
+            origin: options.originIata,
+            destination: options.destinationIata,
+          })
+        : getEffectiveRoute(options?.dryRun ? { store: null } : undefined),
+    ]);
 
-    const rendered = renderEmailContent(offers, resolvedTargetPriceMyr);
+    const rendered = renderEmailContent(offers, resolvedTargetPriceMyr, {
+      origin: options?.originIata || effectiveRoute.origin,
+      destination: options?.destinationIata || effectiveRoute.destination,
+    });
 
     if (options?.dryRun) {
       const baseDir = process.env.VERCEL ? "/tmp" : process.cwd();
@@ -261,11 +318,15 @@ export async function sendEmailReport(
         previewPath = "(skipped on read-only filesystem)";
       }
 
-      console.log("\n================ [DRY-RUN] EMAIL REPORT (ARABIC) ================");
+      console.log(
+        "\n================ [DRY-RUN] EMAIL REPORT (ARABIC) ================"
+      );
       console.log(`Subject: ${rendered.subject}`);
       console.log(rendered.text);
       console.log(`HTML Preview written to: ${previewPath}`);
-      console.log("=================================================================\n");
+      console.log(
+        "=================================================================\n"
+      );
       return { ok: true };
     }
 
@@ -297,9 +358,9 @@ export async function sendEmailReport(
     });
     return { ok: true };
   } catch (err) {
-    const errorMsg = err instanceof Error ? maskSecrets(err.message) : String(err);
+    const errorMsg =
+      err instanceof Error ? maskSecrets(err.message) : String(err);
     logger.error("Unexpected error in sendEmailReport", { error: errorMsg });
     return { ok: false, error: errorMsg };
   }
 }
-

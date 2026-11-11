@@ -1,5 +1,10 @@
 import { env } from "../config/env";
-import { FlightProvider, UnifiedFlightOffer } from "../types/flight";
+import { getEffectiveDates, getEffectiveRoute } from "../services/settings";
+import {
+  FlightProvider,
+  FlightSearchContext,
+  UnifiedFlightOffer,
+} from "../types/flight";
 import { sampleSearchDates } from "../utils/dates";
 import { convertMyrToUsd, getMyrToUsdRate } from "../utils/fx";
 import { buildExternalId } from "../utils/hash";
@@ -159,7 +164,9 @@ export class AmadeusProvider implements FlightProvider {
     return accessToken;
   }
 
-  public async search(): Promise<UnifiedFlightOffer[]> {
+  public async search(
+    context: FlightSearchContext = {}
+  ): Promise<UnifiedFlightOffer[]> {
     if (!this.isConfigured()) {
       return [];
     }
@@ -168,12 +175,24 @@ export class AmadeusProvider implements FlightProvider {
       "Amadeus Self-Service was retired on 2026-07-17; this adapter works only with Enterprise credentials."
     );
 
-    const token = await this.getAccessToken();
-    const dates = sampleSearchDates(
-      env.DATE_FROM,
-      env.DATE_TO,
-      Math.min(6, env.SERPAPI_DATES_PER_RUN)
+    const [effectiveRoute, effectiveDates] = await Promise.all([
+      getEffectiveRoute(),
+      getEffectiveDates(),
+    ]);
+
+    const originIata = (context.originIata || effectiveRoute.origin).toUpperCase();
+    const destinationIata = (
+      context.destinationIata || effectiveRoute.destination
+    ).toUpperCase();
+    const dateFrom = context.dateFrom || effectiveDates.dateFrom;
+    const dateTo = context.dateTo || effectiveDates.dateTo;
+    const datesPerRun = Math.min(
+      6,
+      context.datesPerRun ?? env.SERPAPI_DATES_PER_RUN
     );
+
+    const token = await this.getAccessToken();
+    const dates = sampleSearchDates(dateFrom, dateTo, datesPerRun);
     const usdRate = await getMyrToUsdRate();
     const allOffers: UnifiedFlightOffer[] = [];
 
@@ -186,15 +205,15 @@ export class AmadeusProvider implements FlightProvider {
             Authorization: `Bearer ${token}`,
           },
           params: {
-            originLocationCode: env.ORIGIN_IATA,
-            destinationLocationCode: env.DESTINATION_IATA,
+            originLocationCode: originIata,
+            destinationLocationCode: destinationIata,
             departureDate,
             adults: 1,
             currencyCode: "MYR",
             max: 50,
           },
         },
-        { label: `Amadeus search (${departureDate})` }
+        { label: `Amadeus search (${originIata}->${destinationIata} ${departureDate})` }
       );
 
       const rawList = response.data?.data ?? [];
@@ -211,8 +230,8 @@ export class AmadeusProvider implements FlightProvider {
         const firstSeg = segments[0];
         const lastSeg = segments[segments.length - 1];
 
-        const origin = firstSeg.departure?.iataCode || env.ORIGIN_IATA;
-        const destination = lastSeg.arrival?.iataCode || env.DESTINATION_IATA;
+        const origin = firstSeg.departure?.iataCode || originIata;
+        const destination = lastSeg.arrival?.iataCode || destinationIata;
         const departureTime = firstSeg.departure?.at || `${departureDate}T00:00:00`;
         const arrivalTime = lastSeg.arrival?.at || `${departureDate}T23:59:00`;
 

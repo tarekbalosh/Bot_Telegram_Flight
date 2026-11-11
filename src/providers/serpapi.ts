@@ -1,7 +1,12 @@
 import axios from "axios";
 import { getPrisma } from "../config/db";
 import { env } from "../config/env";
-import { FlightProvider, UnifiedFlightOffer } from "../types/flight";
+import { getEffectiveDates, getEffectiveRoute } from "../services/settings";
+import {
+  FlightProvider,
+  FlightSearchContext,
+  UnifiedFlightOffer,
+} from "../types/flight";
 import { getCurrentYearMonth, sampleSearchDates } from "../utils/dates";
 import { convertMyrToUsd, getMyrToUsdRate } from "../utils/fx";
 import { buildExternalId } from "../utils/hash";
@@ -318,21 +323,37 @@ export class SerpApiProvider implements FlightProvider {
     return Boolean(env.SERPAPI_KEY);
   }
 
-  public async search(): Promise<UnifiedFlightOffer[]> {
+  public async search(
+    context: FlightSearchContext = {}
+  ): Promise<UnifiedFlightOffer[]> {
     if (!env.SERPAPI_KEY) {
       return [];
     }
 
-    const dates = sampleSearchDates(
-      env.DATE_FROM,
-      env.DATE_TO,
-      env.SERPAPI_DATES_PER_RUN
-    );
+    const [effectiveRoute, effectiveDates] = await Promise.all([
+      getEffectiveRoute(),
+      getEffectiveDates(),
+    ]);
+
+    const originIata = (context.originIata || effectiveRoute.origin).toUpperCase();
+    const destinationIata = (
+      context.destinationIata || effectiveRoute.destination
+    ).toUpperCase();
+    const dateFrom = context.dateFrom || effectiveDates.dateFrom;
+    const dateTo = context.dateTo || effectiveDates.dateTo;
+    const datesPerRun = context.datesPerRun ?? env.SERPAPI_DATES_PER_RUN;
+
+    if (datesPerRun <= 0) {
+      return [];
+    }
+
+    const dates = sampleSearchDates(dateFrom, dateTo, datesPerRun);
     const usdRate = await getMyrToUsdRate();
     const budgetKey = `SERPAPI:${getCurrentYearMonth()}`;
     const allOffers: UnifiedFlightOffer[] = [];
 
     logger.info("SerpApi sampled dates for run", {
+      route: `${originIata}-${destinationIata}`,
       dates,
       budgetKey,
       monthlyBudget: env.SERPAPI_MONTHLY_BUDGET,
@@ -360,8 +381,8 @@ export class SerpApiProvider implements FlightProvider {
             url: "https://serpapi.com/search.json",
             params: {
               engine: "google_flights",
-              departure_id: env.ORIGIN_IATA,
-              arrival_id: env.DESTINATION_IATA,
+              departure_id: originIata,
+              arrival_id: destinationIata,
               outbound_date: outboundDate,
               type: "2",
               currency: "MYR",
@@ -371,18 +392,21 @@ export class SerpApiProvider implements FlightProvider {
               api_key: env.SERPAPI_KEY,
             },
           },
-          { label: `SerpApi search (${outboundDate})` }
+          {
+            label: `SerpApi search (${originIata}->${destinationIata} ${outboundDate})`,
+          }
         );
 
         const newCount = await incrementBudgetUsage(budgetKey);
         const parsed = parseSerpApiResponse(response.data, {
           outboundDate,
-          originIata: env.ORIGIN_IATA,
-          destinationIata: env.DESTINATION_IATA,
+          originIata,
+          destinationIata,
           usdRate,
         });
 
         logger.info("SerpApi date search completed", {
+          route: `${originIata}-${destinationIata}`,
           outboundDate,
           offersFound: parsed.length,
           monthlyUsage: `${newCount}/${env.SERPAPI_MONTHLY_BUDGET}`,
@@ -394,10 +418,17 @@ export class SerpApiProvider implements FlightProvider {
           const apiErr = (err.response.data as { error?: string }).error;
           if (apiErr && /hasn't returned any results|no results/i.test(apiErr)) {
             await incrementBudgetUsage(budgetKey);
-            logger.info("SerpApi returned no flights for date", { outboundDate });
+            logger.info("SerpApi returned no flights for date", {
+              route: `${originIata}-${destinationIata}`,
+              outboundDate,
+            });
             continue;
           }
-          if (err.response.status === 401 || err.response.status === 403 || err.response.status === 429) {
+          if (
+            err.response.status === 401 ||
+            err.response.status === 403 ||
+            err.response.status === 429
+          ) {
             throw new Error(
               `SerpApi authentication/quota error (${err.response.status}): ${
                 apiErr || err.message

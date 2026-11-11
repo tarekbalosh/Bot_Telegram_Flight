@@ -1,6 +1,7 @@
 import { env } from "../config/env";
 import { UnifiedFlightOffer } from "../types/flight";
 import { buildExternalId } from "../utils/hash";
+import { getEffectiveDates, getEffectiveRoute } from "./settings";
 
 export interface FilterConfig {
   originIata: string;
@@ -26,15 +27,35 @@ export function getDefaultFilterConfig(): FilterConfig {
   };
 }
 
+export async function getEffectiveFilterConfig(
+  overrides: Partial<FilterConfig> = {}
+): Promise<FilterConfig> {
+  const [route, dates] = await Promise.all([
+    getEffectiveRoute(),
+    getEffectiveDates(),
+  ]);
+  return {
+    originIata: route.origin,
+    destinationIata: route.destination,
+    dateFrom: dates.dateFrom,
+    dateTo: dates.dateTo,
+    minLayoverHours: env.MIN_LAYOVER_HOURS,
+    maxLayoverHours: env.MAX_LAYOVER_HOURS,
+    minBaggageKg: env.MIN_BAGGAGE_KG,
+    baggageUnknownPolicy: env.BAGGAGE_UNKNOWN_POLICY,
+    ...overrides,
+  };
+}
+
 /**
- * Pure filter function enforcing non-negotiable Damascus itinerary rules in strict order:
+ * Pure filter function enforcing non-negotiable itinerary rules in strict order:
  * 1. Single ticket (isSinglePNR === true && bagsRecheckRequired === false)
- * 2. Baggage to DAM (>= minBaggageKg if known; if null, drop on "reject" or keep with baggageVerified=false on "flag")
+ * 2. Checked baggage to destination (>= minBaggageKg if known; if null, drop on "reject" or keep with baggageVerified=false on "flag")
  * 3. Layovers (every layover between minLayoverHours and maxLayoverHours)
  * 4. Sanity (origin/destination match config, departureDate within [dateFrom, dateTo], priceMYR > 0)
  * 5. Dedupe by externalId (keep cheaper; prefer baggageVerified=true on equal price) + sort ascending by priceMYR
  */
-export function filterStrictDamascusFlights(
+export function filterStrictFlights(
   offers: UnifiedFlightOffer[],
   config: Partial<FilterConfig> = {}
 ): UnifiedFlightOffer[] {
@@ -47,11 +68,14 @@ export function filterStrictDamascusFlights(
 
   for (const rawOffer of offers) {
     // Rule 1: Single ticket (single PNR & no bag re-check)
-    if (rawOffer.isSinglePNR !== true || rawOffer.bagsRecheckRequired !== false) {
+    if (
+      rawOffer.isSinglePNR !== true ||
+      rawOffer.bagsRecheckRequired !== false
+    ) {
       continue;
     }
 
-    // Rule 2: Checked baggage to DAM
+    // Rule 2: Checked baggage to final destination
     let baggageVerified = rawOffer.baggageVerified;
     if (rawOffer.checkedBaggageKg !== null) {
       if (rawOffer.checkedBaggageKg < cfg.minBaggageKg) {
@@ -138,4 +162,3 @@ export function filterStrictDamascusFlights(
     (a, b) => a.priceMYR - b.priceMYR
   );
 }
-

@@ -22,9 +22,16 @@ export interface UnifiedFlightOffer {
   bookingLink: string;
 }
 
+export interface FlightSearchContext {
+  originIata?: string;
+  destinationIata?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  datesPerRun?: number;
+}
+
 export interface FlightProvider {
   readonly name: FlightProviderName | "MOCK";
   isConfigured(): boolean;
-  search(): Promise<UnifiedFlightOffer[]>;
+  search(context?: FlightSearchContext): Promise<UnifiedFlightOffer[]>;
 }
-

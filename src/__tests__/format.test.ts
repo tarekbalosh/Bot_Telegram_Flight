@@ -8,6 +8,7 @@ import {
   formatPrice,
   formatPriceFixed,
   formatTransitSummary,
+  getAirportNameAr,
   isValidHttpUrl,
 } from "../services/format";
 
@@ -32,14 +33,31 @@ describe("Arabic Formatter Helpers (format.ts)", () => {
     assert.equal(direct, "رحلة مباشرة بدون توقف");
   });
 
-  it("formats verified and unverified baggage lines exactly as specified", () => {
-    const verified23 = formatBaggageLine({
-      checkedBaggageKg: 23,
-      baggageVerified: true,
-    });
+  it("formats verified and unverified baggage lines dynamically using destinationNameAr", () => {
+    const verifiedDxb = formatBaggageLine(
+      {
+        checkedBaggageKg: 23,
+        baggageVerified: true,
+        destination: "DXB",
+      },
+      "DXB"
+    );
     assert.equal(
-      verified23,
-      "✅ تذكرة موحدة — استلام الحقائب في دمشق (23 كغ)"
+      verifiedDxb,
+      `✅ تذكرة موحدة — استلام الحقائب في ${getAirportNameAr("DXB")} (23 كغ)`
+    );
+
+    const verifiedUnknownAirport = formatBaggageLine(
+      {
+        checkedBaggageKg: 30,
+        baggageVerified: true,
+        destination: "ZZZ",
+      },
+      "ZZZ"
+    );
+    assert.equal(
+      verifiedUnknownAirport,
+      "✅ تذكرة موحدة — استلام الحقائب في ZZZ (30 كغ)"
     );
 
     const unverified = formatBaggageLine({
@@ -65,11 +83,11 @@ describe("Arabic Formatter Helpers (format.ts)", () => {
     assert.ok(dateFormatted.includes("2026-12-10"));
 
     const airlines = formatAirlinesSummary(
-      ["Qatar Airways", "Syrian Air"],
-      ["QR 853", "RB 412"]
+      ["Qatar Airways", "Royal Jordanian"],
+      ["QR 853", "RJ 412"]
     );
-    assert.ok(airlines.includes("Qatar Airways + Syrian Air"));
-    assert.ok(airlines.includes("QR 853 / RB 412"));
+    assert.ok(airlines.includes("Qatar Airways + Royal Jordanian"));
+    assert.ok(airlines.includes("QR 853 / RJ 412"));
   });
 
   it("validates http and https booking URLs", () => {
@@ -79,4 +97,3 @@ describe("Arabic Formatter Helpers (format.ts)", () => {
     assert.equal(isValidHttpUrl("not-a-url"), false);
   });
 });
-

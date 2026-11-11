@@ -1,5 +1,9 @@
 import "dotenv/config";
 import { z } from "zod";
+import {
+  DEFAULT_DESTINATION_IATA,
+  DEFAULT_ORIGIN_IATA,
+} from "../utils/airports";
 import { logger } from "../utils/logger";
 
 const emptyToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
@@ -18,11 +22,18 @@ export const envSchema = z
     DATABASE_URL: emptyToUndefined(z.string().min(1).optional()),
 
     ORIGIN_IATA: emptyToUndefined(
-      z.string().regex(iataRegex, "Must be 3 uppercase letters").default("KUL")
+      z
+        .string()
+        .regex(iataRegex, "Must be 3 uppercase letters")
+        .default(DEFAULT_ORIGIN_IATA)
     ),
     DESTINATION_IATA: emptyToUndefined(
-      z.string().regex(iataRegex, "Must be 3 uppercase letters").default("DAM")
+      z
+        .string()
+        .regex(iataRegex, "Must be 3 uppercase letters")
+        .default(DEFAULT_DESTINATION_IATA)
     ),
+    WATCH_ROUTES: emptyToUndefined(z.string().min(1).optional()),
     DATE_FROM: emptyToUndefined(
       z
         .string()

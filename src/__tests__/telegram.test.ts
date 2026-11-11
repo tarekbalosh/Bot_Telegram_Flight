@@ -15,8 +15,8 @@ function createTestOffer(
   return {
     externalId: `ext-${index}`,
     provider: "SERPAPI",
-    origin: "KUL",
-    destination: "DAM",
+    origin: "SIN",
+    destination: "DXB",
     priceMYR: 2000 + index * 100,
     priceUSD: 440 + index * 22,
     departureDate: `2026-12-1${index}`,
@@ -127,7 +127,6 @@ describe("Telegram Service (telegram.ts)", () => {
       createTestOffer(3),
     ];
 
-    // Force a tight maxLen so flights cannot all fit in one message
     const payloads = buildTelegramPayloads(offers, {
       targetPriceMyr: 2500,
       maxLen: 550,
@@ -183,4 +182,3 @@ describe("Telegram Service (telegram.ts)", () => {
     assert.ok(masked.includes("bot[REDACTED]/sendMessage"));
   });
 });
-

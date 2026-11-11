@@ -115,6 +115,10 @@ cp .env.example .env
 | `/search` | تشغيل بحث فوري الآن (`forceNotify: true`) مع إرسال رد فوري `"⏳ جاري البحث..."` (يخضع لفترة تهدئة `SEARCH_COOLDOWN_MIN` افتراضياً `30 دقيقة`، ويرفض التشغيل المتزامن أو عند نفاد رصيد SerpApi) |
 | `/status` | عرض أقل سعر مسجل تاريخياً (مع التاريخ)، أقل سعر في آخر فحص، السعر المستهدف الحالي، وقت آخر إشعار، استهلاك رصيد SerpApi الشهري، وموعد الفحص المجدول القادم |
 | `/top` | عرض أفضل الرحلات المحفوظة حالياً في قاعدة البيانات (مجمّعة حسب المسار مع أزرار الحجز) **بدون** استدعاء SerpApi وبدون استهلاك أي رصيد |
+| `/route` | عرض المسار النشط الحالي |
+| `/route <ORIGIN> <DEST>` | تغيير مسار البحث برمزي مطار IATA من 3 أحرف (مثال: `/route KUL DXB`) مع حفظ سجل الأسعار والإشعارات بشكل مستقل لكل مسار |
+| `/dates` | عرض نطاق تواريخ البحث الحالي |
+| `/dates <FROM> <TO>` | تعديل تواريخ البحث بصيغة `YYYY-MM-DD` (تواريخ مستقبلية، بحد أقصى 90 يوماً، مثال: `/dates 2026-12-01 2026-12-31`) |
 | `/target <number>` | تعديل السعر المستهدف بالرينغيت الماليزي وحفظه في قاعدة البيانات (النطاق المسموح: `300` إلى `20000`، مثال: `/target 2200`) |
 | `/budget` | عرض عدد عمليات البحث المستهلكة والمتبقية في SerpApi لهذا الشهر |
 
@@ -246,6 +250,10 @@ When running in the default long-lived worker mode (`npm start` or `npm run star
 | `/search` | Trigger `runFlightTrackerAgent({ forceNotify: true })` immediately. Replies `"⏳ جاري البحث..."`, refuses if a run is already in progress, enforces a 30-minute cooldown (`SEARCH_COOLDOWN_MIN="30"`), and refuses if the SerpApi monthly budget is exhausted |
 | `/status` | Show lowest price ever recorded (with date), lowest price from the latest run, current effective `TARGET_PRICE_MYR`, last notification time, monthly SerpApi searches used/budget, and next scheduled run time |
 | `/top` | Display the current best itineraries stored in the database (up to `TELEGRAM_TOP_N`, grouped with inline booking buttons) **without** calling SerpApi (zero budget usage) |
+| `/route` | Show the current active route |
+| `/route <ORIGIN> <DEST>` | Validate two distinct 3-letter IATA codes (e.g. `/route KUL DXB`), persist in `Setting` (`ROUTE`), confirm with Arabic city names, and isolate price history per route |
+| `/dates` | Show the current search date window |
+| `/dates <FROM> <TO>` | Validate (`YYYY-MM-DD`, future dates, `from <= to`, max 90 days), persist in `Setting` (`DATE_FROM`, `DATE_TO`), and confirm |
 | `/target <number>` | Validate (`300`–`20000` MYR), persist the new target price in the `Setting` table (`TARGET_PRICE_MYR`), and confirm |
 | `/budget` | Show SerpApi searches used and remaining for the current month |
 

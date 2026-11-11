@@ -1,25 +1,44 @@
 import { env } from "../config/env";
-import { FlightProvider, UnifiedFlightOffer } from "../types/flight";
+import { getEffectiveDates, getEffectiveRoute } from "../services/settings";
+import {
+  FlightProvider,
+  FlightSearchContext,
+  UnifiedFlightOffer,
+} from "../types/flight";
 import { convertMyrToUsd } from "../utils/fx";
 import { buildExternalId } from "../utils/hash";
+import { buildDefaultGoogleFlightsUrl } from "./serpapi";
+
+export interface BuildMockOffersOptions {
+  originIata?: string;
+  destinationIata?: string;
+  dateFrom?: string;
+}
 
 /**
  * Generates realistic mock offers for --dry-run covering all filter test cases:
  * 1. Valid offer #1: 30 kg verified checked baggage, single PNR, 3.5h layover in DOH
- * 2. Valid offer #2: 23 kg verified checked baggage, single PNR, 4.0h layover in IST
+ * 2. Valid offer #2: 23 kg verified checked baggage, single PNR, 4.0h layover in DXB
  * 3. Self-transfer offer (rejected by Rule 1)
  * 4. Low baggage offer with 15 kg (rejected by Rule 2)
  * 5. Long layover offer with 14 h layover (rejected by Rule 3)
  * 6. Unknown baggage offer (kept with baggageVerified=false under "flag" policy)
  * 7. Duplicate of Valid offer #1 at a higher price from another provider (deduped by Rule 5)
  */
-export function buildMockOffers(): UnifiedFlightOffer[] {
+export function buildMockOffers(
+  options: BuildMockOffersOptions = {}
+): UnifiedFlightOffer[] {
   const rate = env.FALLBACK_MYR_TO_USD;
-  const origin = env.ORIGIN_IATA;
-  const destination = env.DESTINATION_IATA;
-
-  // Use dates inside configured [DATE_FROM, DATE_TO]
-  const baseDate = env.DATE_FROM;
+  const origin = (options.originIata || env.ORIGIN_IATA).toUpperCase();
+  const destination = (
+    options.destinationIata || env.DESTINATION_IATA
+  ).toUpperCase();
+  const baseDate = options.dateFrom || env.DATE_FROM;
+  const bookingLink = buildDefaultGoogleFlightsUrl(
+    origin,
+    destination,
+    baseDate
+  );
 
   const rawDrafts: Array<Omit<UnifiedFlightOffer, "externalId">> = [
     // 1. Valid: 30 kg checked baggage, Qatar Airways via DOH, beats target price (2150 MYR)
@@ -32,8 +51,8 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       departureDate: baseDate,
       departureTime: `${baseDate} 02:45`,
       arrivalTime: `${baseDate} 14:15`,
-      airlines: ["Qatar Airways", "Syrian Air"],
-      flightNumbers: ["QR 853", "RB 412"],
+      airlines: ["Qatar Airways", "Royal Jordanian"],
+      flightNumbers: ["QR 853", "QR 412"],
       transitAirports: ["DOH"],
       layoverDurationsHours: [3.5],
       totalDurationHours: 16.5,
@@ -41,7 +60,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 2. Valid: 23 kg checked baggage, Emirates + Flydubai via DXB (2380 MYR)
     {
@@ -62,7 +81,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 3. Invalid: Self-transfer itinerary (isSinglePNR=false, bagsRecheckRequired=true)
     {
@@ -74,8 +93,8 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       departureDate: baseDate,
       departureTime: `${baseDate} 06:00`,
       arrivalTime: `${baseDate} 20:30`,
-      airlines: ["AirAsia X", "Cham Wings"],
-      flightNumbers: ["D7 170", "6Q 512"],
+      airlines: ["AirAsia X", "Air Arabia"],
+      flightNumbers: ["D7 170", "G9 512"],
       transitAirports: ["SHJ"],
       layoverDurationsHours: [5.0],
       totalDurationHours: 19.5,
@@ -83,7 +102,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: false,
       bagsRecheckRequired: true,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 4. Invalid: Checked baggage only 15 kg (< MIN_BAGGAGE_KG 20 kg)
     {
@@ -104,7 +123,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 5. Invalid: Layover of 14 hours (> MAX_LAYOVER_HOURS 10 h)
     {
@@ -125,7 +144,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 6. Unknown baggage: checkedBaggageKg=null (kept with warning under "flag")
     {
@@ -146,7 +165,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: false,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
     // 7. Duplicate of Valid offer #1 at a higher price from AMADEUS (2520 MYR vs 2150 MYR)
     {
@@ -158,8 +177,8 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       departureDate: baseDate,
       departureTime: `${baseDate} 02:45`,
       arrivalTime: `${baseDate} 14:15`,
-      airlines: ["Qatar Airways", "Syrian Air"],
-      flightNumbers: ["QR 853", "RB 412"],
+      airlines: ["Qatar Airways", "Royal Jordanian"],
+      flightNumbers: ["QR 853", "QR 412"],
       transitAirports: ["DOH"],
       layoverDurationsHours: [3.5],
       totalDurationHours: 16.5,
@@ -167,7 +186,7 @@ export function buildMockOffers(): UnifiedFlightOffer[] {
       baggageVerified: true,
       isSinglePNR: true,
       bagsRecheckRequired: false,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${baseDate}%20oneway`,
+      bookingLink,
     },
   ];
 
@@ -184,8 +203,13 @@ export class MockProvider implements FlightProvider {
     return true;
   }
 
-  public async search(): Promise<UnifiedFlightOffer[]> {
-    return buildMockOffers();
+  public async search(
+    context: FlightSearchContext = {}
+  ): Promise<UnifiedFlightOffer[]> {
+    return buildMockOffers({
+      originIata: context.originIata || env.ORIGIN_IATA,
+      destinationIata: context.destinationIata || env.DESTINATION_IATA,
+      dateFrom: context.dateFrom || env.DATE_FROM,
+    });
   }
 }
-

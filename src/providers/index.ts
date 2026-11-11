@@ -1,4 +1,8 @@
-import { FlightProvider, UnifiedFlightOffer } from "../types/flight";
+import {
+  FlightProvider,
+  FlightSearchContext,
+  UnifiedFlightOffer,
+} from "../types/flight";
 import { logger } from "../utils/logger";
 import { AmadeusProvider } from "./amadeus";
 import { KiwiProvider } from "./kiwi";
@@ -11,7 +15,7 @@ export const REGISTERED_PROVIDERS: readonly FlightProvider[] = [
   new KiwiProvider(),
 ];
 
-export interface FetchOffersOptions {
+export interface FetchOffersOptions extends FlightSearchContext {
   dryRun?: boolean;
 }
 
@@ -21,7 +25,7 @@ export async function fetchAllOffers(
   if (options.dryRun) {
     const mock = new MockProvider();
     const startMs = Date.now();
-    const offers = await mock.search();
+    const offers = await mock.search(options);
     logger.info("Provider finished", {
       provider: mock.name,
       status: "ok",
@@ -40,7 +44,7 @@ export async function fetchAllOffers(
   const timedRuns = active.map(async (provider) => {
     const startMs = Date.now();
     try {
-      const offers = await provider.search();
+      const offers = await provider.search(options);
       const durationMs = Date.now() - startMs;
       logger.info("Provider finished", {
         provider: provider.name,
@@ -73,4 +77,3 @@ export async function fetchAllOffers(
 
   return merged;
 }
-

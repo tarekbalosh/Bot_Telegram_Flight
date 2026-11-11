@@ -1,5 +1,10 @@
 import { env } from "../config/env";
-import { FlightProvider, UnifiedFlightOffer } from "../types/flight";
+import { getEffectiveDates, getEffectiveRoute } from "../services/settings";
+import {
+  FlightProvider,
+  FlightSearchContext,
+  UnifiedFlightOffer,
+} from "../types/flight";
 import { toDdMmYyyy } from "../utils/dates";
 import { convertMyrToUsd, getMyrToUsdRate } from "../utils/fx";
 import { buildExternalId } from "../utils/hash";
@@ -50,7 +55,9 @@ export class KiwiProvider implements FlightProvider {
     return Boolean(env.KIWI_API_KEY);
   }
 
-  public async search(): Promise<UnifiedFlightOffer[]> {
+  public async search(
+    context: FlightSearchContext = {}
+  ): Promise<UnifiedFlightOffer[]> {
     if (!this.isConfigured()) {
       return [];
     }
@@ -58,6 +65,18 @@ export class KiwiProvider implements FlightProvider {
     logger.warn(
       "Kiwi Tequila public self-serve closed in May 2024; this adapter is for invited B2B partners only."
     );
+
+    const [effectiveRoute, effectiveDates] = await Promise.all([
+      getEffectiveRoute(),
+      getEffectiveDates(),
+    ]);
+
+    const originIata = (context.originIata || effectiveRoute.origin).toUpperCase();
+    const destinationIata = (
+      context.destinationIata || effectiveRoute.destination
+    ).toUpperCase();
+    const dateFrom = context.dateFrom || effectiveDates.dateFrom;
+    const dateTo = context.dateTo || effectiveDates.dateTo;
 
     const usdRate = await getMyrToUsdRate();
 
@@ -69,10 +88,10 @@ export class KiwiProvider implements FlightProvider {
           apikey: env.KIWI_API_KEY || "",
         },
         params: {
-          fly_from: env.ORIGIN_IATA,
-          fly_to: env.DESTINATION_IATA,
-          date_from: toDdMmYyyy(env.DATE_FROM),
-          date_to: toDdMmYyyy(env.DATE_TO),
+          fly_from: originIata,
+          fly_to: destinationIata,
+          date_from: toDdMmYyyy(dateFrom),
+          date_to: toDdMmYyyy(dateTo),
           flight_type: "oneway",
           curr: "MYR",
           adults: 1,
@@ -81,7 +100,7 @@ export class KiwiProvider implements FlightProvider {
           sort: "price",
         },
       },
-      { label: "Kiwi Tequila search" }
+      { label: `Kiwi Tequila search (${originIata}->${destinationIata})` }
     );
 
     const items = response.data?.data ?? [];
@@ -97,13 +116,13 @@ export class KiwiProvider implements FlightProvider {
       const firstSeg = route[0];
       const lastSeg = route[route.length - 1];
 
-      const origin = item.flyFrom || firstSeg.flyFrom || env.ORIGIN_IATA;
-      const destination = item.flyTo || lastSeg.flyTo || env.DESTINATION_IATA;
+      const origin = item.flyFrom || firstSeg.flyFrom || originIata;
+      const destination = item.flyTo || lastSeg.flyTo || destinationIata;
 
       const departureTime =
-        item.local_departure || firstSeg.local_departure || `${env.DATE_FROM}T00:00:00`;
+        item.local_departure || firstSeg.local_departure || `${dateFrom}T00:00:00`;
       const arrivalTime =
-        item.local_arrival || lastSeg.local_arrival || `${env.DATE_FROM}T23:59:00`;
+        item.local_arrival || lastSeg.local_arrival || `${dateFrom}T23:59:00`;
       const departureDate = departureTime.slice(0, 10);
 
       const airlines = Array.from(

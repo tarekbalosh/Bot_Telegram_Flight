@@ -10,6 +10,7 @@ datasource db {
 model FlightOfferRecord {
   id                     String   @id @default(cuid())
   externalId             String   @unique
+  route                  String   @default("KUL-DAM")
   provider               String
   priceMYR               Float
   priceUSD               Float
@@ -28,24 +29,33 @@ model FlightOfferRecord {
   bookingLink            String
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+
+  @@index([route])
 }
 
 model PriceSnapshot {
   id         String   @id @default(cuid())
   externalId String
+  route      String   @default("KUL-DAM")
   priceMYR   Float
   observedAt DateTime @default(now())
 
+  @@index([route])
+  @@index([route, observedAt])
   @@index([externalId, observedAt])
   @@index([observedAt])
 }
 
 model NotificationLog {
   id             String   @id @default(cuid())
+  route          String   @default("KUL-DAM")
   lowestPriceMYR Float
   channel        String
   reason         String
   sentAt         DateTime @default(now())
+
+  @@index([route])
+  @@index([route, sentAt])
 }
 
 model ApiUsage {
