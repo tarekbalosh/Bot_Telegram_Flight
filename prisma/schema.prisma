@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model FlightOfferRecord {
+  id                     String   @id @default(cuid())
+  externalId             String   @unique
+  provider               String
+  priceMYR               Float
+  priceUSD               Float
+  departureDate          String
+  departureTime          String
+  arrivalTime            String
+  airlines               String[]
+  flightNumbers          String[]
+  transitAirports        String[]
+  layoverDurationsHours  Float[]
+  totalDurationHours     Float
+  checkedBaggageKg       Int?
+  baggageVerified        Boolean
+  isSinglePNR            Boolean
+  bagsRecheckRequired    Boolean
+  bookingLink            String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  externalId String
+  priceMYR   Float
+  observedAt DateTime @default(now())
+
+  @@index([externalId, observedAt])
+  @@index([observedAt])
+}
+
+model NotificationLog {
+  id             String   @id @default(cuid())
+  lowestPriceMYR Float
+  channel        String
+  reason         String
+  sentAt         DateTime @default(now())
+}
+
+model ApiUsage {
+  key       String   @id
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
