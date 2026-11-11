@@ -9,6 +9,7 @@ const testConfig: FilterConfig = {
   destinationIata: "DAM",
   dateFrom: "2026-12-01",
   dateTo: "2026-12-31",
+  minLayoverHours: 2,
   maxLayoverHours: 10,
   minBaggageKg: 20,
   baggageUnknownPolicy: "flag",
@@ -87,6 +88,28 @@ describe("filterStrictDamascusFlights", () => {
     const offer = makeOffer({ layoverDurationsHours: [2.5, 12.0] });
     const result = filterStrictDamascusFlights([offer], testConfig);
     assert.equal(result.length, 0);
+  });
+
+  it("rejects itineraries with layovers below MIN_LAYOVER_HOURS (1.5 h < 2 h)", () => {
+    const tooShort = makeOffer({ layoverDurationsHours: [1.5] });
+    const exactMin = makeOffer({
+      layoverDurationsHours: [2.0],
+      flightNumbers: ["QR 853", "QR 412"],
+    });
+    const exactMax = makeOffer({
+      layoverDurationsHours: [10.0],
+      flightNumbers: ["QR 853", "QR 414"],
+    });
+
+    const result = filterStrictDamascusFlights(
+      [tooShort, exactMin, exactMax],
+      testConfig
+    );
+    assert.equal(result.length, 2);
+    assert.deepEqual(
+      result.map((o) => o.layoverDurationsHours[0]),
+      [2.0, 10.0]
+    );
   });
 
   it("rejects out-of-range dates, non-matching airports, and non-positive prices", () => {

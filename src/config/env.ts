@@ -35,6 +35,9 @@ export const envSchema = z
         .regex(dateRegex, "Must be YYYY-MM-DD")
         .default("2026-12-31")
     ),
+    MIN_LAYOVER_HOURS: emptyToUndefined(
+      z.coerce.number().nonnegative().default(2)
+    ),
     MAX_LAYOVER_HOURS: emptyToUndefined(
       z.coerce.number().positive().default(10)
     ),
@@ -75,6 +78,9 @@ export const envSchema = z
     // Telegram (primary notification channel)
     TELEGRAM_BOT_TOKEN: emptyToUndefined(z.string().min(1).optional()),
     TELEGRAM_CHAT_ID: emptyToUndefined(z.string().min(1).optional()),
+    TELEGRAM_TOP_N: emptyToUndefined(
+      z.coerce.number().int().positive().default(5)
+    ),
 
     // Email (Resend)
     RESEND_API_KEY: emptyToUndefined(z.string().min(1).optional()),
@@ -86,6 +92,10 @@ export const envSchema = z
   .refine((data) => data.DATE_FROM <= data.DATE_TO, {
     message: "DATE_FROM must be less than or equal to DATE_TO",
     path: ["DATE_FROM"],
+  })
+  .refine((data) => data.MIN_LAYOVER_HOURS <= data.MAX_LAYOVER_HOURS, {
+    message: "MIN_LAYOVER_HOURS must be less than or equal to MAX_LAYOVER_HOURS",
+    path: ["MIN_LAYOVER_HOURS"],
   });
 
 export type EnvConfig = z.infer<typeof envSchema>;

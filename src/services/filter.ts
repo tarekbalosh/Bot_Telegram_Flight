@@ -7,6 +7,7 @@ export interface FilterConfig {
   destinationIata: string;
   dateFrom: string;
   dateTo: string;
+  minLayoverHours: number;
   maxLayoverHours: number;
   minBaggageKg: number;
   baggageUnknownPolicy: "flag" | "reject";
@@ -18,6 +19,7 @@ export function getDefaultFilterConfig(): FilterConfig {
     destinationIata: env.DESTINATION_IATA,
     dateFrom: env.DATE_FROM,
     dateTo: env.DATE_TO,
+    minLayoverHours: env.MIN_LAYOVER_HOURS,
     maxLayoverHours: env.MAX_LAYOVER_HOURS,
     minBaggageKg: env.MIN_BAGGAGE_KG,
     baggageUnknownPolicy: env.BAGGAGE_UNKNOWN_POLICY,
@@ -28,7 +30,7 @@ export function getDefaultFilterConfig(): FilterConfig {
  * Pure filter function enforcing non-negotiable Damascus itinerary rules in strict order:
  * 1. Single ticket (isSinglePNR === true && bagsRecheckRequired === false)
  * 2. Baggage to DAM (>= minBaggageKg if known; if null, drop on "reject" or keep with baggageVerified=false on "flag")
- * 3. Layovers (every layover <= maxLayoverHours)
+ * 3. Layovers (every layover between minLayoverHours and maxLayoverHours)
  * 4. Sanity (origin/destination match config, departureDate within [dateFrom, dateTo], priceMYR > 0)
  * 5. Dedupe by externalId (keep cheaper; prefer baggageVerified=true on equal price) + sort ascending by priceMYR
  */
@@ -63,9 +65,12 @@ export function filterStrictDamascusFlights(
       baggageVerified = false;
     }
 
-    // Rule 3: Layovers
+    // Rule 3: Layovers (every layover between minLayoverHours and maxLayoverHours)
     const hasInvalidLayover = rawOffer.layoverDurationsHours.some(
-      (hours) => hours > cfg.maxLayoverHours || hours < 0 || Number.isNaN(hours)
+      (hours) =>
+        hours < cfg.minLayoverHours ||
+        hours > cfg.maxLayoverHours ||
+        Number.isNaN(hours)
     );
     if (hasInvalidLayover) {
       continue;

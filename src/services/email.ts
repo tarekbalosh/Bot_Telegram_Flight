@@ -249,10 +249,15 @@ export async function sendEmailReport(
     );
 
     if (options?.dryRun) {
-      const previewDir = path.resolve(process.cwd(), "dist-preview");
-      fs.mkdirSync(previewDir, { recursive: true });
-      const previewPath = path.join(previewDir, "email.html");
-      fs.writeFileSync(previewPath, rendered.html, "utf8");
+      const baseDir = process.env.VERCEL ? "/tmp" : process.cwd();
+      const previewDir = path.resolve(baseDir, "dist-preview");
+      let previewPath = path.join(previewDir, "email.html");
+      try {
+        fs.mkdirSync(previewDir, { recursive: true });
+        fs.writeFileSync(previewPath, rendered.html, "utf8");
+      } catch {
+        previewPath = "(skipped on read-only filesystem)";
+      }
 
       console.log("\n================ [DRY-RUN] EMAIL REPORT (ARABIC) ================");
       console.log(`Subject: ${rendered.subject}`);

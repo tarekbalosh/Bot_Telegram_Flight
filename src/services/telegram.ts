@@ -36,6 +36,80 @@ export interface NotificationResult {
   error?: string;
 }
 
+export interface GroupedFlightItinerary {
+  key: string;
+  representative: UnifiedFlightOffer;
+  dates: string[];
+  departureClock: string;
+  arrivalClock: string;
+}
+
+function extractTimeOfDay(dateTimeStr: string): string {
+  const trimmed = dateTimeStr.trim();
+  const match = trimmed.match(/(\d{1,2}:\d{2})/);
+  return match ? match[1] : trimmed;
+}
+
+export function buildItineraryGroupKey(offer: UnifiedFlightOffer): string {
+  const airlinesPart = offer.airlines
+    .map((a) => a.trim().toUpperCase())
+    .join(",");
+  const flightsPart = offer.flightNumbers
+    .map((f) => f.replace(/\s+/g, "").toUpperCase())
+    .join(",");
+  const depClock = extractTimeOfDay(offer.departureTime);
+  const arrClock = extractTimeOfDay(offer.arrivalTime);
+  return `${airlinesPart}|${flightsPart}|${depClock}|${arrClock}`;
+}
+
+/**
+ * Groups offers by distinct itinerary (same airlines + flight numbers + times).
+ * Keeps the lowest-priced offer as representative, collects sorted unique dates,
+ * and returns up to topN itineraries sorted ascending by lowest price.
+ */
+export function groupOffersByItinerary(
+  offers: UnifiedFlightOffer[],
+  topN: number = env.TELEGRAM_TOP_N
+): GroupedFlightItinerary[] {
+  const groups = new Map<
+    string,
+    { representative: UnifiedFlightOffer; dates: Set<string> }
+  >();
+
+  for (const offer of offers) {
+    const key = buildItineraryGroupKey(offer);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        representative: offer,
+        dates: new Set([offer.departureDate]),
+      });
+    } else {
+      existing.dates.add(offer.departureDate);
+      if (offer.priceMYR < existing.representative.priceMYR) {
+        existing.representative = offer;
+      } else if (
+        offer.priceMYR === existing.representative.priceMYR &&
+        offer.baggageVerified &&
+        !existing.representative.baggageVerified
+      ) {
+        existing.representative = offer;
+      }
+    }
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, { representative, dates }]) => ({
+      key,
+      representative,
+      dates: Array.from(dates).sort(),
+      departureClock: extractTimeOfDay(representative.departureTime),
+      arrivalClock: extractTimeOfDay(representative.arrivalTime),
+    }))
+    .sort((a, b) => a.representative.priceMYR - b.representative.priceMYR)
+    .slice(0, topN);
+}
+
 export function buildInlineKeyboard(
   flights: UnifiedFlightOffer[]
 ): TelegramReplyMarkup | undefined {
@@ -46,7 +120,7 @@ export function buildInlineKeyboard(
     if (isValidHttpUrl(url)) {
       rows.push([
         {
-          text: `${ARABIC_STRINGS.bookButtonPrefix} #${idx + 1} ✈️`,
+          text: `احجز #${idx + 1} ✈️`,
           url,
         },
       ]);
@@ -95,80 +169,94 @@ export function renderTelegramHeaderHtml(
   ].join("\n");
 }
 
-export function renderSingleFlightBlockHtml(
-  flight: UnifiedFlightOffer,
+export function renderItineraryBlockHtml(
+  group: GroupedFlightItinerary,
   index: number
 ): string {
   const rank = index + 1;
-  const dateText = escapeHtml(formatFlightDate(flight.departureDate));
-  const depArrText = escapeHtml(
-    wrapLtr(`${flight.departureTime} ➔ ${flight.arrivalTime}`)
-  );
+  const flight = group.representative;
+
   const priceText = `${escapeHtml(
     wrapLtr(`${formatPrice(flight.priceMYR)}`)
   )} ${escapeHtml(ARABIC_STRINGS.myrUnit)} (${escapeHtml(
     wrapLtr(`$${formatPrice(flight.priceUSD)} USD`)
   )})`;
+
+  const datesText = group.dates
+    .map((d) => escapeHtml(wrapLtr(d)))
+    .join(" ، ");
+
   const airlinesText = escapeHtml(
     formatAirlinesSummary(flight.airlines, flight.flightNumbers)
+  );
+  const timingText = escapeHtml(
+    wrapLtr(`${group.departureClock} ➔ ${group.arrivalClock}`)
   );
   const transitText = escapeHtml(
     formatTransitSummary(flight.transitAirports, flight.layoverDurationsHours)
   );
-  const durationText = `${escapeHtml(
-    String(Math.round(flight.totalDurationHours * 10) / 10)
-  )} ${escapeHtml(ARABIC_STRINGS.hoursUnit)}`;
   const baggageBadge = escapeHtml(formatBaggageLine(flight));
 
   const linkUrl = flight.bookingLink?.trim() || "";
-  const linkLine = isValidHttpUrl(linkUrl)
-    ? `🔗 <b>${escapeHtml(ARABIC_STRINGS.bookingLinkLabel)}:</b> <a href="${escapeHtml(
-        linkUrl
-      )}">${escapeHtml(ARABIC_STRINGS.bookNowButton)}</a>`
-    : `🔗 <b>${escapeHtml(ARABIC_STRINGS.bookingLinkLabel)}:</b> ${escapeHtml(
-        linkUrl
-      )}`;
+  const linkPart = isValidHttpUrl(linkUrl)
+    ? ` — <a href="${escapeHtml(linkUrl)}">احجز ✈️</a>`
+    : "";
 
   return [
     `━━━━━━━━━━━━━━━━━━━━`,
-    `✈️ <b>${escapeHtml(ARABIC_STRINGS.flightHeaderPrefix)} #${rank}</b>`,
-    `📅 <b>${escapeHtml(ARABIC_STRINGS.dateLabel)}:</b> ${dateText}`,
-    `🕒 <b>${escapeHtml(ARABIC_STRINGS.timingLabel)}:</b> ${depArrText} (${escapeHtml(
-      ARABIC_STRINGS.totalDurationLabel
-    )}: ${durationText})`,
-    `💵 <b>${escapeHtml(ARABIC_STRINGS.priceLabel)}:</b> <b>${priceText}</b>`,
-    `🏢 <b>${escapeHtml(ARABIC_STRINGS.airlinesLabel)}:</b> ${airlinesText}`,
-    `🔄 <b>${escapeHtml(ARABIC_STRINGS.transitLabel)}:</b> ${transitText}`,
-    `🧳 <b>${escapeHtml(ARABIC_STRINGS.baggageLabel)}:</b> ${baggageBadge}`,
-    linkLine,
+    `✈️ <b>${escapeHtml(ARABIC_STRINGS.flightHeaderPrefix)} #${rank}</b> — 💵 <b>${priceText}</b>${linkPart}`,
+    `📅 <b>${escapeHtml(ARABIC_STRINGS.dateLabel)}:</b> ${datesText}`,
+    `🏢 ${airlinesText} | 🕒 ${timingText}`,
+    `🔄 ${transitText}`,
+    `🧳 ${baggageBadge}`,
   ].join("\n");
+}
+
+export function renderSingleFlightBlockHtml(
+  flight: UnifiedFlightOffer,
+  index: number
+): string {
+  return renderItineraryBlockHtml(
+    {
+      key: buildItineraryGroupKey(flight),
+      representative: flight,
+      dates: [flight.departureDate],
+      departureClock: extractTimeOfDay(flight.departureTime),
+      arrivalClock: extractTimeOfDay(flight.arrivalTime),
+    },
+    index
+  );
 }
 
 /**
  * Builds one or more Telegram messages (each <= maxLen characters, default 4096),
- * splitting strictly on flight boundaries and attaching the inline keyboard to the last message.
+ * grouping offers by distinct itinerary, splitting strictly on itinerary boundaries,
+ * and attaching the inline keyboard to the last message.
  */
 export function buildTelegramPayloads(
   offers: UnifiedFlightOffer[],
   options?: {
     targetPriceMyr?: number;
     maxLen?: number;
+    topN?: number;
   }
 ): TelegramMessagePayload[] {
   const maxLen = options?.maxLen ?? TELEGRAM_MAX_MESSAGE_LENGTH;
   const targetPriceMyr = options?.targetPriceMyr ?? env.TARGET_PRICE_MYR;
+  const topN = options?.topN ?? env.TELEGRAM_TOP_N;
 
-  const top3 = offers.slice(0, 3);
-  const header = renderTelegramHeaderHtml(top3, targetPriceMyr);
+  const topGroups = groupOffersByItinerary(offers, topN);
+  const representativeFlights = topGroups.map((g) => g.representative);
+  const header = renderTelegramHeaderHtml(representativeFlights, targetPriceMyr);
 
-  if (top3.length === 0) {
+  if (topGroups.length === 0) {
     return [{ text: header.slice(0, maxLen) }];
   }
 
-  const flightBlocks = top3.map((flight, i) =>
-    renderSingleFlightBlockHtml(flight, i)
+  const flightBlocks = topGroups.map((group, i) =>
+    renderItineraryBlockHtml(group, i)
   );
-  const keyboard = buildInlineKeyboard(top3);
+  const keyboard = buildInlineKeyboard(representativeFlights);
 
   const chunks: string[] = [];
   let currentChunk = header;
@@ -326,7 +414,7 @@ export async function sendTelegramReport(
 
     logger.info("Telegram report sent successfully", {
       messagesSent: payloads.length,
-      flightsIncluded: Math.min(3, offers.length),
+      itinerariesIncluded: groupOffersByItinerary(offers, env.TELEGRAM_TOP_N).length,
     });
     return { ok: true };
   } catch (err) {
