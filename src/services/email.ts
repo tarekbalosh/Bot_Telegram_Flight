@@ -15,6 +15,7 @@ import {
   isValidHttpUrl,
   wrapLtr,
 } from "./format";
+import { getEffectiveTarget } from "./settings";
 import { NotificationResult } from "./telegram";
 
 export interface RenderedEmailContent {
@@ -243,10 +244,11 @@ export async function sendEmailReport(
   }
 ): Promise<NotificationResult> {
   try {
-    const rendered = renderEmailContent(
-      offers,
-      options?.targetPriceMyr ?? env.TARGET_PRICE_MYR
-    );
+    const resolvedTargetPriceMyr =
+      options?.targetPriceMyr ??
+      (options?.dryRun ? env.TARGET_PRICE_MYR : await getEffectiveTarget());
+
+    const rendered = renderEmailContent(offers, resolvedTargetPriceMyr);
 
     if (options?.dryRun) {
       const baseDir = process.env.VERCEL ? "/tmp" : process.cwd();

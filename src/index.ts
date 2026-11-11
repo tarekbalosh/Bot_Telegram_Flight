@@ -1,6 +1,10 @@
 import cron, { ScheduledTask } from "node-cron";
 import { disconnectPrisma } from "./config/db";
 import { env } from "./config/env";
+import {
+  startTelegramCommandPoller,
+  TelegramPollerHandle,
+} from "./services/telegram-commands";
 import { runFlightTrackerAgent } from "./services/tracker";
 import { logger, maskSecrets } from "./utils/logger";
 
@@ -71,7 +75,11 @@ async function main(): Promise<void> {
   logger.info("Initializing long-lived Flight Tracker worker", {
     cronSchedule: env.CRON_SCHEDULE,
     timezone: env.TZ_NAME,
+    telegramCommandsEnabled: env.TELEGRAM_COMMANDS_ENABLED,
   });
+
+  let telegramPoller: TelegramPollerHandle | null =
+    startTelegramCommandPoller();
 
   // Initial startup run
   await runFlightTrackerAgent({
@@ -108,6 +116,11 @@ async function main(): Promise<void> {
     if (scheduledTask) {
       scheduledTask.stop();
       scheduledTask = null;
+    }
+    if (telegramPoller) {
+      const pollerToStop = telegramPoller;
+      telegramPoller = null;
+      await pollerToStop.stop();
     }
     await disconnectPrisma();
     process.exit(0);

@@ -54,3 +54,10 @@ model ApiUsage {
   updatedAt DateTime @updatedAt
 }
 
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+

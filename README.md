@@ -105,6 +105,23 @@ cp .env.example .env
 
 ---
 
+### 4.1 الأوامر التفاعلية عبر بوت تيليجرام (Interactive Telegram Commands)
+
+عند تشغيل البرنامج في الوضع المستمر (`npm start` أو `npm run start:prod`)، يقوم البوت بالاستماع للأوامر التفاعلية عبر `getUpdates (Long-Polling)` وتسجيل قائمة الأوامر تلقائياً في قائمة تيليجرام (`setMyCommands`). لأسباب أمنية، يتجاهل البوت تماماً أي رسائل واردة من محادثات أخرى غير `TELEGRAM_CHAT_ID`.
+
+| أمر تيليجرام | الوصف |
+|---|---|
+| `/start` أو `/help` | عرض رسالة الترحيب وقائمة الأوامر المتاحة بالعربية |
+| `/search` | تشغيل بحث فوري الآن (`forceNotify: true`) مع إرسال رد فوري `"⏳ جاري البحث..."` (يخضع لفترة تهدئة `SEARCH_COOLDOWN_MIN` افتراضياً `30 دقيقة`، ويرفض التشغيل المتزامن أو عند نفاد رصيد SerpApi) |
+| `/status` | عرض أقل سعر مسجل تاريخياً (مع التاريخ)، أقل سعر في آخر فحص، السعر المستهدف الحالي، وقت آخر إشعار، استهلاك رصيد SerpApi الشهري، وموعد الفحص المجدول القادم |
+| `/top` | عرض أفضل الرحلات المحفوظة حالياً في قاعدة البيانات (مجمّعة حسب المسار مع أزرار الحجز) **بدون** استدعاء SerpApi وبدون استهلاك أي رصيد |
+| `/target <number>` | تعديل السعر المستهدف بالرينغيت الماليزي وحفظه في قاعدة البيانات (النطاق المسموح: `300` إلى `20000`، مثال: `/target 2200`) |
+| `/budget` | عرض عدد عمليات البحث المستهلكة والمتبقية في SerpApi لهذا الشهر |
+
+> ⚠️ **ملاحظة هامة حول الأوامر التفاعلية:** تتطلب أوامر تيليجرام التفاعلية بقاء العملية قيد التشغيل بشكل مستمر (`npm start` أو `npm run start:prod` على جهازك الشخصي أو على خادم VPS باستخدام **PM2** أو **systemd**). **لا تعمل** الأوامر التفاعلية عند الاعتماد فقط على **GitHub Actions** لأن GitHub Actions يشغّل البوت في وضع الفحص المفرد (`--once`) ثم يغلق العملية فوراً.
+
+---
+
 ### 5. خيارات النشر والتشغيل المستمر (Deployment)
 
 #### الخيار 1: GitHub Actions (مجاني تماماً — موصى به)
@@ -216,6 +233,23 @@ cp .env.example .env
 - `npm test` — Run unit tests (`tsx --test`).
 - `npm run typecheck` — Run TypeScript type checker (`tsc --noEmit`).
 - `npm run build` / `npm run start:prod` — Compile to `dist/` and run compiled JS.
+
+---
+
+### 4.1 Interactive Telegram Bot Commands
+
+When running in the default long-lived worker mode (`npm start` or `npm run start:prod`) with `TELEGRAM_COMMANDS_ENABLED="true"` (default), the bot long-polls Telegram `getUpdates` and registers its Arabic command menu via `setMyCommands`. For security, updates from any chat whose `chat.id !== TELEGRAM_CHAT_ID` are silently ignored (with a masked warning log).
+
+| Telegram Command | Description |
+|---|---|
+| `/start` or `/help` | List all available bot commands in Arabic |
+| `/search` | Trigger `runFlightTrackerAgent({ forceNotify: true })` immediately. Replies `"⏳ جاري البحث..."`, refuses if a run is already in progress, enforces a 30-minute cooldown (`SEARCH_COOLDOWN_MIN="30"`), and refuses if the SerpApi monthly budget is exhausted |
+| `/status` | Show lowest price ever recorded (with date), lowest price from the latest run, current effective `TARGET_PRICE_MYR`, last notification time, monthly SerpApi searches used/budget, and next scheduled run time |
+| `/top` | Display the current best itineraries stored in the database (up to `TELEGRAM_TOP_N`, grouped with inline booking buttons) **without** calling SerpApi (zero budget usage) |
+| `/target <number>` | Validate (`300`–`20000` MYR), persist the new target price in the `Setting` table (`TARGET_PRICE_MYR`), and confirm |
+| `/budget` | Show SerpApi searches used and remaining for the current month |
+
+> ⚠️ **Important Note:** Interactive Telegram commands require the Node.js process to stay running continuously (e.g., on your own PC or a VPS managed with **PM2** / **systemd** using `npm start` or `npm run start:prod`). They do **not** work when running exclusively via **GitHub Actions** (`--once`), because GitHub Actions only starts the process for a single scheduled check and exits immediately.
 
 ---
 

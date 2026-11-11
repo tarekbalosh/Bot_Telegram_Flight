@@ -14,6 +14,7 @@ import {
   isValidHttpUrl,
   wrapLtr,
 } from "./format";
+import { getEffectiveTarget } from "./settings";
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
@@ -373,8 +374,12 @@ export async function sendTelegramReport(
   }
 ): Promise<NotificationResult> {
   try {
+    const resolvedTargetPriceMyr =
+      options?.targetPriceMyr ??
+      (options?.dryRun ? env.TARGET_PRICE_MYR : await getEffectiveTarget());
+
     const payloads = buildTelegramPayloads(offers, {
-      targetPriceMyr: options?.targetPriceMyr ?? env.TARGET_PRICE_MYR,
+      targetPriceMyr: resolvedTargetPriceMyr,
     });
 
     if (options?.dryRun) {

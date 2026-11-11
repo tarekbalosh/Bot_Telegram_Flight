@@ -81,6 +81,20 @@ export const envSchema = z
     TELEGRAM_TOP_N: emptyToUndefined(
       z.coerce.number().int().positive().default(5)
     ),
+    TELEGRAM_COMMANDS_ENABLED: emptyToUndefined(
+      z.preprocess((val) => {
+        if (typeof val === "boolean") return val;
+        if (typeof val === "string") {
+          const normalized = val.trim().toLowerCase();
+          if (["true", "1", "yes", "on"].includes(normalized)) return true;
+          if (["false", "0", "no", "off"].includes(normalized)) return false;
+        }
+        return val;
+      }, z.boolean().default(true))
+    ),
+    SEARCH_COOLDOWN_MIN: emptyToUndefined(
+      z.coerce.number().nonnegative().default(30)
+    ),
 
     // Email (Resend)
     RESEND_API_KEY: emptyToUndefined(z.string().min(1).optional()),

@@ -9,7 +9,10 @@ import { fetchAllOffers } from "../providers";
 import { logger } from "../utils/logger";
 import { sendEmailReport } from "./email";
 import { filterStrictDamascusFlights } from "./filter";
+import { getEffectiveTarget } from "./settings";
 import { sendTelegramReport } from "./telegram";
+
+export { getEffectiveTarget } from "./settings";
 
 export type NotificationReason = "FORCED" | "NEW_LOW" | "TARGET_HIT" | "DAILY";
 
@@ -31,6 +34,10 @@ export interface TrackerRunSummary {
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 let isRunInProgress = false;
+
+export function isTrackerRunInProgress(): boolean {
+  return isRunInProgress;
+}
 
 export function decideNotificationReason(params: {
   validCount: number;
@@ -234,12 +241,16 @@ export async function runFlightTrackerAgent(
       };
     }
 
+    const effectiveTargetMyr = dryRun
+      ? env.TARGET_PRICE_MYR
+      : await getEffectiveTarget();
+
     const reason = decideNotificationReason({
       validCount: validOffers.length,
       currentLowestMyr,
       previousLowestMyr,
       lastNotification,
-      targetPriceMyr: env.TARGET_PRICE_MYR,
+      targetPriceMyr: effectiveTargetMyr,
       forceNotify,
     });
 
@@ -247,7 +258,7 @@ export async function runFlightTrackerAgent(
       logger.info("No notification trigger met for this run", {
         currentLowestMyr,
         previousLowestMyr,
-        targetPriceMyr: env.TARGET_PRICE_MYR,
+        targetPriceMyr: effectiveTargetMyr,
       });
       return {
         rawCount: rawOffers.length,
@@ -262,6 +273,7 @@ export async function runFlightTrackerAgent(
       reason,
       currentLowestMyr,
       previousLowestMyr,
+      targetPriceMyr: effectiveTargetMyr,
     });
 
     // 7. Send Telegram and Email independently
@@ -269,8 +281,14 @@ export async function runFlightTrackerAgent(
 
     if (dryRun) {
       const [tgRes, emailRes] = await Promise.all([
-        sendTelegramReport(validOffers, { dryRun: true }),
-        sendEmailReport(validOffers, { dryRun: true }),
+        sendTelegramReport(validOffers, {
+          dryRun: true,
+          targetPriceMyr: effectiveTargetMyr,
+        }),
+        sendEmailReport(validOffers, {
+          dryRun: true,
+          targetPriceMyr: effectiveTargetMyr,
+        }),
       ]);
       if (tgRes.ok) notified.push("TELEGRAM");
       if (emailRes.ok) notified.push("EMAIL");
@@ -281,7 +299,10 @@ export async function runFlightTrackerAgent(
       if (telegramConfigured()) {
         tasks.push(
           (async () => {
-            const res = await sendTelegramReport(validOffers, { dryRun: false });
+            const res = await sendTelegramReport(validOffers, {
+              dryRun: false,
+              targetPriceMyr: effectiveTargetMyr,
+            });
             if (res.ok) {
               notified.push("TELEGRAM");
               await prisma.notificationLog.create({
@@ -301,7 +322,10 @@ export async function runFlightTrackerAgent(
       if (emailConfigured()) {
         tasks.push(
           (async () => {
-            const res = await sendEmailReport(validOffers, { dryRun: false });
+            const res = await sendEmailReport(validOffers, {
+              dryRun: false,
+              targetPriceMyr: effectiveTargetMyr,
+            });
             if (res.ok) {
               notified.push("EMAIL");
               await prisma.notificationLog.create({
