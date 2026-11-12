@@ -1,18 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": "public",
   "functions": {
-    "api/*.ts": {
+    "api/telegram.ts": {
       "maxDuration": 300
-    }
-  },
-  "schedules": {
-    "daily-flight-tracker": {
-      "schedule": "0 8 * * *",
-      "timezone": "Asia/Kuala_Lumpur",
-      "path": "/api/cron",
-      "requestMethod": "GET"
     }
   }
 }
-

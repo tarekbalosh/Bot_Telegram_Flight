@@ -81,11 +81,17 @@ async function main(): Promise<void> {
   let telegramPoller: TelegramPollerHandle | null =
     startTelegramCommandPoller();
 
-  // Initial startup run
-  await runFlightTrackerAgent({
-    forceNotify: false,
-    noNotify: flags.noNotify,
-  });
+  // Initial startup run (non-fatal so the long-lived worker and Telegram poller stay alive)
+  try {
+    await runFlightTrackerAgent({
+      forceNotify: false,
+      noNotify: flags.noNotify,
+    });
+  } catch (err) {
+    logger.error("Initial startup tracker run failed; continuing worker loop", {
+      error: err instanceof Error ? maskSecrets(err.message) : String(err),
+    });
+  }
 
   let scheduledTask: ScheduledTask | null = cron.schedule(
     env.CRON_SCHEDULE,

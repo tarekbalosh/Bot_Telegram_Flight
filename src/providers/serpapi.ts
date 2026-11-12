@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getPrisma } from "../config/db";
+import { getPrisma, withDbRetry } from "../config/db";
 import { env } from "../config/env";
 import { getEffectiveDates, getEffectiveRoute } from "../services/settings";
 import {
@@ -291,9 +291,13 @@ export function parseSerpApiResponse(
 
 async function checkBudgetAvailable(budgetKey: string, limit: number): Promise<boolean> {
   const prisma = getPrisma();
-  const usage = await prisma.apiUsage.findUnique({
-    where: { key: budgetKey },
-  });
+  const usage = await withDbRetry(
+    () =>
+      prisma.apiUsage.findUnique({
+        where: { key: budgetKey },
+      }),
+    "checkBudgetAvailable"
+  );
   const currentCount = usage?.count ?? 0;
   if (currentCount >= limit) {
     logger.warn("SerpApi monthly budget reached; skipping request", {
@@ -308,11 +312,15 @@ async function checkBudgetAvailable(budgetKey: string, limit: number): Promise<b
 
 async function incrementBudgetUsage(budgetKey: string): Promise<number> {
   const prisma = getPrisma();
-  const updated = await prisma.apiUsage.upsert({
-    where: { key: budgetKey },
-    create: { key: budgetKey, count: 1 },
-    update: { count: { increment: 1 } },
-  });
+  const updated = await withDbRetry(
+    () =>
+      prisma.apiUsage.upsert({
+        where: { key: budgetKey },
+        create: { key: budgetKey, count: 1 },
+        update: { count: { increment: 1 } },
+      }),
+    "incrementBudgetUsage"
+  );
   return updated.count;
 }
 

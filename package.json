@@ -9,6 +9,7 @@
     "run:once": "tsx src/index.ts --once",
     "dry-run": "tsx src/index.ts --dry-run",
     "telegram:setup": "tsx src/scripts/telegram-setup.ts",
+    "telegram:webhook": "tsx src/scripts/telegram-webhook.ts",
     "db:push": "prisma db push",
     "build": "tsc",
     "start:prod": "node dist/index.js",

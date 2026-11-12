@@ -1,4 +1,4 @@
-import { getPrisma } from "../config/db";
+import { getPrisma, withDbRetry } from "../config/db";
 import {
   assertLiveReady,
   emailConfigured,
@@ -140,23 +140,23 @@ export function decideNotificationReason(params: {
 export function createPrismaRouteStore(): RoutePersistenceStore {
   return {
     async getRouteHistory(routeKey: string) {
-      const prisma = getPrisma();
-      const [minSnapshotAgg, latestNotif] = await Promise.all([
-        prisma.priceSnapshot.aggregate({
+      return withDbRetry(async () => {
+        const prisma = getPrisma();
+        const minSnapshotAgg = await prisma.priceSnapshot.aggregate({
           where: { route: routeKey },
           _min: { priceMYR: true },
-        }),
-        prisma.notificationLog.findFirst({
+        });
+        const latestNotif = await prisma.notificationLog.findFirst({
           where: { route: routeKey },
           orderBy: { sentAt: "desc" },
           select: { lowestPriceMYR: true, sentAt: true },
-        }),
-      ]);
+        });
 
-      return {
-        previousLowestMyr: minSnapshotAgg._min.priceMYR ?? null,
-        lastNotification: latestNotif ?? null,
-      };
+        return {
+          previousLowestMyr: minSnapshotAgg._min.priceMYR ?? null,
+          lastNotification: latestNotif ?? null,
+        };
+      }, `getRouteHistory(${routeKey})`);
     },
 
     async persistRouteOffers(
@@ -166,10 +166,10 @@ export function createPrismaRouteStore(): RoutePersistenceStore {
       if (validOffers.length === 0) {
         return;
       }
-      const prisma = getPrisma();
-      await prisma.$transaction(
-        validOffers.flatMap((offer) => [
-          prisma.flightOfferRecord.upsert({
+      await withDbRetry(async () => {
+        const prisma = getPrisma();
+        for (const offer of validOffers) {
+          await prisma.flightOfferRecord.upsert({
             where: { externalId: offer.externalId },
             create: {
               externalId: offer.externalId,
@@ -210,28 +210,31 @@ export function createPrismaRouteStore(): RoutePersistenceStore {
               bagsRecheckRequired: offer.bagsRecheckRequired,
               bookingLink: offer.bookingLink,
             },
-          }),
-          prisma.priceSnapshot.create({
-            data: {
-              externalId: offer.externalId,
-              route: routeKey,
-              priceMYR: offer.priceMYR,
-            },
-          }),
-        ])
-      );
+          });
+        }
+
+        await prisma.priceSnapshot.createMany({
+          data: validOffers.map((offer) => ({
+            externalId: offer.externalId,
+            route: routeKey,
+            priceMYR: offer.priceMYR,
+          })),
+        });
+      }, `persistRouteOffers(${routeKey})`);
     },
 
     async recordNotification({ routeKey, lowestPriceMYR, channel, reason }) {
-      const prisma = getPrisma();
-      await prisma.notificationLog.create({
-        data: {
-          route: routeKey,
-          lowestPriceMYR,
-          channel,
-          reason,
-        },
-      });
+      await withDbRetry(async () => {
+        const prisma = getPrisma();
+        await prisma.notificationLog.create({
+          data: {
+            route: routeKey,
+            lowestPriceMYR,
+            channel,
+            reason,
+          },
+        });
+      }, `recordNotification(${routeKey})`);
     },
   };
 }

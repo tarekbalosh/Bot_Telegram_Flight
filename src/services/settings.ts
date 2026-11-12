@@ -1,4 +1,4 @@
-import { getPrisma } from "../config/db";
+import { getPrisma, withDbRetry } from "../config/db";
 import { env } from "../config/env";
 import {
   buildRouteInfo,
@@ -21,6 +21,23 @@ export const MAX_DATE_RANGE_DAYS = 90;
 
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function getDefaultSettingStore(): SettingStore {
+  return {
+    findUnique(args) {
+      return withDbRetry(
+        () => getPrisma().setting.findUnique(args),
+        `setting.findUnique(${args.where.key})`
+      );
+    },
+    upsert(args) {
+      return withDbRetry(
+        () => getPrisma().setting.upsert(args),
+        `setting.upsert(${args.where.key})`
+      );
+    },
+  };
+}
 
 export interface SettingRecord {
   key: string;
@@ -152,7 +169,7 @@ export async function getEffectiveTarget(
     options?.store !== undefined
       ? options.store
       : env.DATABASE_URL
-      ? getPrisma().setting
+      ? getDefaultSettingStore()
       : null;
 
   if (!store) {
@@ -186,7 +203,7 @@ export async function setEffectiveTarget(
   targetPriceMyr: number,
   store?: SettingStore
 ): Promise<void> {
-  const resolvedStore = store ?? getPrisma().setting;
+  const resolvedStore = store ?? getDefaultSettingStore();
   const value = String(targetPriceMyr);
   await resolvedStore.upsert({
     where: { key: SETTING_KEY_TARGET_PRICE },
@@ -211,7 +228,7 @@ export async function getEffectiveRoute(
     options?.store !== undefined
       ? options.store
       : env.DATABASE_URL
-      ? getPrisma().setting
+      ? getDefaultSettingStore()
       : null;
 
   if (!store) {
@@ -247,7 +264,7 @@ export async function setEffectiveRoute(
   store?: SettingStore
 ): Promise<RouteInfo> {
   const route = buildRouteInfo(origin, destination);
-  const resolvedStore = store ?? getPrisma().setting;
+  const resolvedStore = store ?? getDefaultSettingStore();
   await resolvedStore.upsert({
     where: { key: SETTING_KEY_ROUTE },
     create: { key: SETTING_KEY_ROUTE, value: route.routeKey },
@@ -272,7 +289,7 @@ export async function getEffectiveDates(
     options?.store !== undefined
       ? options.store
       : env.DATABASE_URL
-      ? getPrisma().setting
+      ? getDefaultSettingStore()
       : null;
 
   if (!store) {
@@ -313,7 +330,7 @@ export async function setEffectiveDates(
   dateTo: string,
   store?: SettingStore
 ): Promise<EffectiveDates> {
-  const resolvedStore = store ?? getPrisma().setting;
+  const resolvedStore = store ?? getDefaultSettingStore();
   const cleanFrom = dateFrom.trim();
   const cleanTo = dateTo.trim();
 
@@ -355,7 +372,7 @@ export async function getLastManualSearchTime(
     store !== undefined
       ? store
       : env.DATABASE_URL
-      ? getPrisma().setting
+      ? getDefaultSettingStore()
       : null;
 
   if (!resolvedStore) {
@@ -395,7 +412,7 @@ export async function setLastManualSearchTime(
     store !== undefined
       ? store
       : env.DATABASE_URL
-      ? getPrisma().setting
+      ? getDefaultSettingStore()
       : null;
 
   if (!resolvedStore) {

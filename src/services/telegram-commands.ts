@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getPrisma } from "../config/db";
+import { getPrisma, withDbRetry } from "../config/db";
 import { env, telegramConfigured } from "../config/env";
 import { FlightProviderName, UnifiedFlightOffer } from "../types/flight";
 import {
@@ -546,9 +546,13 @@ export async function getSerpApiBudgetStatus(
   }
 
   const prisma = getPrisma();
-  const usage = await prisma.apiUsage.findUnique({
-    where: { key: budgetKey },
-  });
+  const usage = await withDbRetry(
+    () =>
+      prisma.apiUsage.findUnique({
+        where: { key: budgetKey },
+      }),
+    "getSerpApiBudgetStatus"
+  );
   const used = usage?.count ?? 0;
   const remaining = Math.max(0, budget - used);
 
@@ -566,12 +570,10 @@ export async function getSerpApiBudgetStatus(
 export async function fetchStatusData(
   now: Date = new Date()
 ): Promise<StatusSnapshotData> {
-  const [route, dates, targetPriceMyr, budget] = await Promise.all([
-    getEffectiveRoute(),
-    getEffectiveDates(),
-    getEffectiveTarget(),
-    getSerpApiBudgetStatus(now),
-  ]);
+  const route = await getEffectiveRoute();
+  const dates = await getEffectiveDates();
+  const targetPriceMyr = await getEffectiveTarget();
+  const budget = await getSerpApiBudgetStatus(now);
   const nextScheduledRun = getNextScheduledRunTime(
     env.CRON_SCHEDULE,
     env.TZ_NAME,
@@ -591,67 +593,67 @@ export async function fetchStatusData(
     };
   }
 
-  const prisma = getPrisma();
-  const [lowestSnapshot, latestSnapshot, lastNotification] = await Promise.all([
-    prisma.priceSnapshot.findFirst({
+  return withDbRetry(async () => {
+    const prisma = getPrisma();
+    const lowestSnapshot = await prisma.priceSnapshot.findFirst({
       where: { route: route.routeKey },
       orderBy: [{ priceMYR: "asc" }, { observedAt: "asc" }],
-    }),
-    prisma.priceSnapshot.findFirst({
+    });
+    const latestSnapshot = await prisma.priceSnapshot.findFirst({
       where: { route: route.routeKey },
       orderBy: { observedAt: "desc" },
-    }),
-    prisma.notificationLog.findFirst({
+    });
+    const lastNotification = await prisma.notificationLog.findFirst({
       where: { route: route.routeKey },
       orderBy: { sentAt: "desc" },
-    }),
-  ]);
-
-  let lowestLatestRun: { priceMYR: number; observedAt: Date } | null = null;
-  if (latestSnapshot) {
-    const runWindowStart = new Date(
-      latestSnapshot.observedAt.getTime() - 60_000
-    );
-    const minInLatestBatch = await prisma.priceSnapshot.findFirst({
-      where: {
-        route: route.routeKey,
-        observedAt: { gte: runWindowStart },
-      },
-      orderBy: [{ priceMYR: "asc" }, { observedAt: "desc" }],
     });
-    lowestLatestRun = minInLatestBatch
-      ? {
-          priceMYR: minInLatestBatch.priceMYR,
-          observedAt: minInLatestBatch.observedAt,
-        }
-      : {
-          priceMYR: latestSnapshot.priceMYR,
-          observedAt: latestSnapshot.observedAt,
-        };
-  }
 
-  return {
-    route,
-    dates,
-    lowestEver: lowestSnapshot
-      ? {
-          priceMYR: lowestSnapshot.priceMYR,
-          observedAt: lowestSnapshot.observedAt,
-        }
-      : null,
-    lowestLatestRun,
-    targetPriceMyr,
-    lastNotification: lastNotification
-      ? {
-          lowestPriceMYR: lastNotification.lowestPriceMYR,
-          channel: lastNotification.channel,
-          reason: lastNotification.reason,
-          sentAt: lastNotification.sentAt,
-        }
-      : null,
-    budget,
-    nextScheduledRun,
-  };
+    let lowestLatestRun: { priceMYR: number; observedAt: Date } | null = null;
+    if (latestSnapshot) {
+      const runWindowStart = new Date(
+        latestSnapshot.observedAt.getTime() - 60_000
+      );
+      const minInLatestBatch = await prisma.priceSnapshot.findFirst({
+        where: {
+          route: route.routeKey,
+          observedAt: { gte: runWindowStart },
+        },
+        orderBy: [{ priceMYR: "asc" }, { observedAt: "desc" }],
+      });
+      lowestLatestRun = minInLatestBatch
+        ? {
+            priceMYR: minInLatestBatch.priceMYR,
+            observedAt: minInLatestBatch.observedAt,
+          }
+        : {
+            priceMYR: latestSnapshot.priceMYR,
+            observedAt: latestSnapshot.observedAt,
+          };
+    }
+
+    return {
+      route,
+      dates,
+      lowestEver: lowestSnapshot
+        ? {
+            priceMYR: lowestSnapshot.priceMYR,
+            observedAt: lowestSnapshot.observedAt,
+          }
+        : null,
+      lowestLatestRun,
+      targetPriceMyr,
+      lastNotification: lastNotification
+        ? {
+            lowestPriceMYR: lastNotification.lowestPriceMYR,
+            channel: lastNotification.channel,
+            reason: lastNotification.reason,
+            sentAt: lastNotification.sentAt,
+          }
+        : null,
+      budget,
+      nextScheduledRun,
+    };
+  }, `fetchStatusData(${route.routeKey})`);
 }
 
 /**
@@ -665,22 +667,21 @@ export async function fetchTopOffersFromDb(
     return [];
   }
 
-  const [route, dates] = await Promise.all([
-    customRoute ? Promise.resolve(customRoute) : getEffectiveRoute(),
-    getEffectiveDates(),
-  ]);
+  const route = customRoute ? customRoute : await getEffectiveRoute();
+  const dates = await getEffectiveDates();
 
-  const prisma = getPrisma();
-  const [latestSnapshots, offerRecords] = await Promise.all([
-    prisma.priceSnapshot.findMany({
+  const { latestSnapshots, offerRecords } = await withDbRetry(async () => {
+    const prisma = getPrisma();
+    const snaps = await prisma.priceSnapshot.findMany({
       where: { route: route.routeKey },
       distinct: ["externalId"],
       orderBy: [{ externalId: "asc" }, { observedAt: "desc" }],
-    }),
-    prisma.flightOfferRecord.findMany({
+    });
+    const recs = await prisma.flightOfferRecord.findMany({
       where: { route: route.routeKey },
-    }),
-  ]);
+    });
+    return { latestSnapshots: snaps, offerRecords: recs };
+  }, `fetchTopOffersFromDb(${route.routeKey})`);
 
   if (offerRecords.length === 0) {
     return [];
