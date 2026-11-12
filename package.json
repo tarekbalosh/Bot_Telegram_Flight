@@ -11,7 +11,7 @@
     "telegram:setup": "tsx src/scripts/telegram-setup.ts",
     "telegram:webhook": "tsx src/scripts/telegram-webhook.ts",
     "db:push": "prisma db push",
-    "build": "tsc",
+    "build": "tsc && tsx src/scripts/telegram-webhook.ts --auto-vercel",
     "start:prod": "node dist/index.js",
     "test": "tsx --test src/__tests__/*.test.ts",
     "typecheck": "tsc --noEmit",
