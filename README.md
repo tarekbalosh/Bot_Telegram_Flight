@@ -1,5 +1,5 @@
 # ✈️ وكيل تتبع رحلات الطيران الذكي (كوالالمبور KUL ➔ دمشق DAM)
-# Flight Tracker Autonomous Agent (KUL ➔ DAM) — Telegram + Email Edition
+# Flight Tracker Autonomous Agent (KUL ➔ DAM) — Telegram Edition
 
 ---
 
@@ -11,7 +11,7 @@
 - **شحن الحقائب إلى دمشق:** يشترط توفر حقيبة مشحونة لا تقل عن `MIN_BAGGAGE_KG` (افتراضياً `20 كغ`) حتى مطار دمشق، أو يضع تنبيهاً واضحاً إذا لم يفصح المزود عن وزن الحقيبة (`BAGGAGE_UNKNOWN_POLICY="flag"`).
 - **ترانزيت منطقي:** يرفض أي رحلة تتجاوز مدة الانتظار في أي محطة ترانزيت `MAX_LAYOVER_HOURS` (افتراضياً `10 ساعات`).
 - **سجل تاريخي للأسعار (Price History):** يحفظ العروض وسجل تغير الأسعار في قاعدة بيانات **PostgreSQL (Neon)** عبر **Prisma v6**.
-- **إشعارات عربية فورية:** يرسل تقارير مفصلة باللغة العربية عبر **بوت تيليجرام (Telegram Bot)** (مع أزرار حجز تفاعلية مباشرة) و**البريد الإلكتروني (Resend)** (بتصميم HTML RTL متجاوب).
+- **إشعارات عربية فورية:** يرسل تقارير مفصلة باللغة العربية عبر **بوت تيليجرام (Telegram Bot)** (مع أزرار حجز تفاعلية مباشرة).
 
 ---
 
@@ -24,7 +24,7 @@ npm install
 # 2. تجربة النظام بالكامل ببيانات تجريبية (بدون قاعدة بيانات وبدون مفاتيح API)
 npm run dry-run
 ```
-سيقوم الأمر `npm run dry-run` بتصفية العروض التجريبية، وطباعة تقرير تيليجرام بالعربية في الطرفية، وحفظ معاينة البريد الإلكتروني في الملف `./dist-preview/email.html`.
+سيقوم الأمر `npm run dry-run` بتصفية العروض التجريبية وطباعة تقرير تيليجرام بالعربية في الطرفية.
 
 ---
 
@@ -71,17 +71,7 @@ cp .env.example .env
    ```
 6. انسخ رقم `TELEGRAM_CHAT_ID` الذي سيظهر لك وضعه في `.env`، ثم أعد تشغيل `npm run telegram:setup` لإرسال رسالة الاختبار العربية (`"✅ تم ربط البوت بنجاح"`).
 
-#### د) إعداد البريد الإلكتروني عبر Resend (`RESEND_API_KEY`) — قناة إضافية اختيارية
-1. أنشئ حساباً مجانياً في [Resend.com](https://resend.com) وانسخ مفتاح الـ API.
-2. **مهم جداً:** بدون توثيق نطاق خاص (Custom Domain)، يسمح Resend بالإرسال **فقط** من العنوان `onboarding@resend.dev` **وإلى البريد الإلكتروني المسجل به حسابك في Resend حصراً**.
-3. إذا قمت بتوثيق نطاقك في Resend، يمكنك تغيير `EMAIL_FROM` والإرسال لأي مستلم:
-   ```env
-   RESEND_API_KEY="re_xxxxxxxxx"
-   EMAIL_FROM="Flight Agent <onboarding@resend.dev>"
-   EMAIL_TO="your-own-account-email@example.com"
-   ```
-
-#### هـ) المزودات الاختيارية القديمة (Amadeus / Kiwi)
+#### د) المزودات الاختيارية القديمة (Amadeus / Kiwi)
 - **Amadeus:** تم إيقاف بوابة الخدمة الذاتية المجانية (`Amadeus Self-Service`) نهائياً بتاريخ **17 يوليو 2026**. يعمل محول Amadeus فقط لمن يمتلك عقد **Enterprise** رسمي.
 - **Kiwi Tequila:** التسجيل العام مغلق منذ مايو 2024 ومتاح فقط لشركاء B2B المدعوين.
 - اترك مفاتيحهما فارغة في `.env` ما لم تكن تمتلك صلاحية وصول مؤسسية.
@@ -136,7 +126,7 @@ cp .env.example .env
    - `SERPAPI_KEY`
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID`
-   - (اختيارياً) `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_TO`, `DATE_FROM`, `DATE_TO`, `TARGET_PRICE_MYR`
+   - (اختيارياً) `DATE_FROM`, `DATE_TO`, `TARGET_PRICE_MYR`
 3. ادفع مخطط قاعدة البيانات مرة واحدة من جهازك عبر `npm run db:push`.
 
 #### الخيار 2: خادم خاص (VPS — Ubuntu / Debian)
@@ -189,7 +179,7 @@ An autonomous, production-ready TypeScript agent that searches **one-way** fligh
 2. **Checked baggage to DAM:** Requires at least `MIN_BAGGAGE_KG` (default `20 kg`) checked through to Damascus, or flags unknown baggage with an explicit Arabic warning when `BAGGAGE_UNKNOWN_POLICY="flag"`.
 3. **Sane layovers:** Rejects any itinerary where any layover exceeds `MAX_LAYOVER_HOURS` (default `10 hours`).
 4. **Price History:** Persists deduplicated offers and historical `PriceSnapshot` records in PostgreSQL (Neon) via Prisma v6.
-5. **Arabic Notifications:** Delivers rich Arabic alerts via **Telegram Bot** (with inline booking buttons) and **Email (Resend)** (responsive RTL HTML + plain text fallback).
+5. **Arabic Notifications:** Delivers rich Arabic alerts via **Telegram Bot** (with inline booking buttons).
 
 ---
 
@@ -199,7 +189,7 @@ An autonomous, production-ready TypeScript agent that searches **one-way** fligh
 npm install
 npm run dry-run
 ```
-`npm run dry-run` executes the full pipeline using realistic mock offers (without needing a database or API keys), prints the Arabic Telegram report and plain-text email to the console, and writes the RTL HTML email preview to `./dist-preview/email.html`.
+`npm run dry-run` executes the full pipeline using realistic mock offers (without needing a database or API keys) and prints the Arabic Telegram report to the console.
 
 ---
 
@@ -218,8 +208,6 @@ cp .env.example .env
   3. Open your new bot in Telegram and press **Start**.
   4. Run `npm run telegram:setup` to automatically discover your `TELEGRAM_CHAT_ID`.
   5. Add `TELEGRAM_CHAT_ID` to `.env` and run `npm run telegram:setup` again to send the Arabic test message (`"✅ تم ربط البوت بنجاح"`).
-- **Email (`RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_TO`):**
-  - Without a verified custom domain on Resend, you can only send from `onboarding@resend.dev` to the email address of the Resend account owner.
 - **Optional Legacy Providers (`AMADEUS_*`, `KIWI_API_KEY`):**
   - Amadeus Self-Service was retired on **17 July 2026** (Enterprise credentials required).
   - Kiwi Tequila self-serve has been closed since May 2024 (invited B2B partners only).

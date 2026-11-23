@@ -107,12 +107,10 @@ export const ARABIC_STRINGS = {
     return formatSingleTicketConfirmText();
   },
   telegramTestSuccess: "✅ تم ربط البوت بنجاح",
-  emailFooterNote:
-    "جميع الرحلات المعروضة أعلاه مفحوصة آلياً: تذكرة موحدة (Single PNR) بدون إعادة تسليم الحقائب في مطار الترانزيت.",
 } as const;
 
 /**
- * Escapes dynamic values for safe inclusion in Telegram HTML and Email HTML.
+ * Escapes dynamic values for safe inclusion in Telegram HTML.
  */
 export function escapeHtml(value: string | number | null | undefined): string {
   if (value === null || value === undefined) {

@@ -12,10 +12,6 @@ export function maskSecrets(input: string): string {
   if (serpKey && serpKey.length >= 4) {
     masked = masked.split(serpKey).join("[REDACTED]");
   }
-  const resendKey = process.env.RESEND_API_KEY?.trim();
-  if (resendKey && resendKey.length >= 4) {
-    masked = masked.split(resendKey).join("[REDACTED]");
-  }
   return masked;
 }
 

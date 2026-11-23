@@ -106,13 +106,6 @@ export const envSchema = z
     SEARCH_COOLDOWN_MIN: emptyToUndefined(
       z.coerce.number().nonnegative().default(30)
     ),
-
-    // Email (Resend)
-    RESEND_API_KEY: emptyToUndefined(z.string().min(1).optional()),
-    EMAIL_FROM: emptyToUndefined(
-      z.string().min(1).default("Flight Agent <onboarding@resend.dev>")
-    ),
-    EMAIL_TO: emptyToUndefined(z.string().email().optional()),
   })
   .refine((data) => data.DATE_FROM <= data.DATE_TO, {
     message: "DATE_FROM must be less than or equal to DATE_TO",
@@ -147,10 +140,6 @@ export function telegramConfigured(cfg: EnvConfig = env): boolean {
   return Boolean(cfg.TELEGRAM_BOT_TOKEN && cfg.TELEGRAM_CHAT_ID);
 }
 
-export function emailConfigured(cfg: EnvConfig = env): boolean {
-  return Boolean(cfg.RESEND_API_KEY && cfg.EMAIL_FROM && cfg.EMAIL_TO);
-}
-
 export function assertLiveReady(cfg: EnvConfig = env): void {
   const missingEn: string[] = [];
   const missingAr: string[] = [];
@@ -183,21 +172,10 @@ export function assertLiveReady(cfg: EnvConfig = env): void {
   }
 
   const tgReady = telegramConfigured(cfg);
-  const mailReady = emailConfigured(cfg);
 
   if (!tgReady) {
     logger.warn(
-      "Telegram channel is not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing); Telegram notifications will be skipped."
-    );
-  }
-  if (!mailReady) {
-    logger.warn(
-      "Email channel is not configured (RESEND_API_KEY / EMAIL_TO missing); Email notifications will be skipped."
-    );
-  }
-  if (!tgReady && !mailReady) {
-    logger.warn(
-      "⚠️ WARNING / تحذير: No notification channel (Telegram or Email) is configured in live mode! Results will only be stored in the database, not delivered."
+      "⚠️ WARNING / تحذير: Telegram channel is not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing); notifications will be skipped and results will only be stored in the database."
     );
   }
 }

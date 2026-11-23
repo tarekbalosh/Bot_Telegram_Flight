@@ -1,7 +1,6 @@
 import { getPrisma, withDbRetry } from "../config/db";
 import {
   assertLiveReady,
-  emailConfigured,
   env,
   telegramConfigured,
 } from "../config/env";
@@ -12,7 +11,6 @@ import {
   splitDatesPerRunAcrossRoutes,
 } from "../utils/airports";
 import { logger } from "../utils/logger";
-import { sendEmailReport } from "./email";
 import { filterStrictFlights } from "./filter";
 import {
   EffectiveDates,
@@ -265,15 +263,6 @@ export async function executeSingleRouteRun(params: {
       destinationIata: string;
     }
   ) => Promise<{ ok: boolean }>;
-  notifyEmailFn?: (
-    offers: UnifiedFlightOffer[],
-    opts: {
-      dryRun: boolean;
-      targetPriceMyr: number;
-      originIata: string;
-      destinationIata: string;
-    }
-  ) => Promise<{ ok: boolean }>;
 }): Promise<RouteRunSummary> {
   const {
     route,
@@ -389,81 +378,35 @@ export async function executeSingleRouteRun(params: {
 
   const notified: string[] = [];
   const notifyTg = params.notifyTelegramFn ?? sendTelegramReport;
-  const notifyMail = params.notifyEmailFn ?? sendEmailReport;
 
   if (dryRun) {
-    const [tgRes, emailRes] = await Promise.all([
-      notifyTg(validOffers, {
-        dryRun: true,
-        targetPriceMyr,
-        originIata: route.origin,
-        destinationIata: route.destination,
-      }),
-      notifyMail(validOffers, {
-        dryRun: true,
-        targetPriceMyr,
-        originIata: route.origin,
-        destinationIata: route.destination,
-      }),
-    ]);
+    const tgRes = await notifyTg(validOffers, {
+      dryRun: true,
+      targetPriceMyr,
+      originIata: route.origin,
+      destinationIata: route.destination,
+    });
     if (tgRes.ok) notified.push("TELEGRAM");
-    if (emailRes.ok) notified.push("EMAIL");
+  } else if (telegramConfigured() || params.notifyTelegramFn) {
+    const res = await notifyTg(validOffers, {
+      dryRun: false,
+      targetPriceMyr,
+      originIata: route.origin,
+      destinationIata: route.destination,
+    });
+    if (res.ok) {
+      notified.push("TELEGRAM");
+      if (store) {
+        await store.recordNotification({
+          routeKey: route.routeKey,
+          lowestPriceMYR: currentLowestMyr ?? 0,
+          channel: "TELEGRAM",
+          reason,
+        });
+      }
+    }
   } else {
-    const tasks: Promise<void>[] = [];
-
-    if (telegramConfigured() || params.notifyTelegramFn) {
-      tasks.push(
-        (async () => {
-          const res = await notifyTg(validOffers, {
-            dryRun: false,
-            targetPriceMyr,
-            originIata: route.origin,
-            destinationIata: route.destination,
-          });
-          if (res.ok) {
-            notified.push("TELEGRAM");
-            if (store) {
-              await store.recordNotification({
-                routeKey: route.routeKey,
-                lowestPriceMYR: currentLowestMyr ?? 0,
-                channel: "TELEGRAM",
-                reason,
-              });
-            }
-          }
-        })()
-      );
-    } else {
-      logger.warn("Skipping Telegram delivery: channel not configured.");
-    }
-
-    if (emailConfigured() || params.notifyEmailFn) {
-      tasks.push(
-        (async () => {
-          const res = await notifyMail(validOffers, {
-            dryRun: false,
-            targetPriceMyr,
-            originIata: route.origin,
-            destinationIata: route.destination,
-          });
-          if (res.ok) {
-            notified.push("EMAIL");
-            if (store) {
-              await store.recordNotification({
-                routeKey: route.routeKey,
-                lowestPriceMYR: currentLowestMyr ?? 0,
-                channel: "EMAIL",
-                reason,
-              });
-            }
-          }
-        })()
-      );
-    } else {
-      logger.warn("Skipping Email delivery: channel not configured.");
-    }
-
-    await Promise.allSettled(tasks);
+    logger.warn("Skipping Telegram delivery: channel not configured.");
   }
 
   return {
